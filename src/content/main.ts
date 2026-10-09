@@ -19,6 +19,8 @@ const painter = createPainter(nativeHighlightApi());
 let file: DocFile = emptyDoc();
 /** Resolves once the stored record is read; nothing is written before, so a failed read never erases it. */
 let loaded: Promise<boolean> = Promise.resolve(false);
+/** Counts local edits, so a read that started before one is not taken over it. */
+let edits = 0;
 const saver = createSaver(() => rooms.storage.write(DOC_PATH, serialize(file)));
 let ui: Ui | null = null;
 /** "Highlight + note" uses the last color picked, for this page only: the script has no storage of its own. */
@@ -48,12 +50,17 @@ function placeBadges(): void {
 }
 
 async function load(): Promise<boolean> {
+  const at = edits;
+  await saver.settled();
+  let read: DocFile;
   try {
-    file = parseDocFile(await rooms.storage.read(DOC_PATH));
+    read = parseDocFile(await rooms.storage.read(DOC_PATH));
   } catch (e) {
     console.warn("[highlights] could not read the highlights of this document", e);
     return false;
   }
+  if (at !== edits) return true;
+  file = read;
   repaint();
   return true;
 }
@@ -66,6 +73,7 @@ async function ensureLoaded(): Promise<boolean> {
 }
 
 function apply(edit: Edit): void {
+  edits++;
   file = { ...applyEdit(file, edit, now()), title: document.title };
   repaint();
   saver.changed();

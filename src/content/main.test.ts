@@ -133,6 +133,30 @@ describe("the content script", () => {
     }
   });
 
+  it("keeps a local edit when a read that started before it lands after it", async () => {
+    await boot();
+    let finish!: (text: string | null) => void;
+    app.read.mockImplementationOnce(() => new Promise((r) => (finish = r)));
+    app.onAction!("agree", select("quick"));
+    app.onDataChanged!("highlights.json");
+    await flush();
+    finish(null);
+    await saved();
+    expect(stored().highlights.map((h: { text: string }) => h.text)).toEqual(["quick"]);
+  });
+
+  it("reads the record again only after a queued write lands, so the edit is not reverted", async () => {
+    await boot();
+    app.onAction!("agree", select("quick"));
+    await flush();
+    app.onDataChanged!("highlights.json");
+    await saved();
+    await flush();
+    app.onAction!("idk", select("lazy dog"));
+    await saved();
+    expect(stored().highlights.map((h: { text: string }) => h.text)).toEqual(["quick", "lazy dog"]);
+  });
+
   it("reads the record again when another frame changes it", async () => {
     await boot();
     app.read.mockClear();
