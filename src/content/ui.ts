@@ -39,7 +39,7 @@ const CSS_TEXT = `
 .layer{position:absolute;top:0;left:0;width:0;height:0;z-index:2147483647}
 .card{position:absolute;width:326px;max-width:92vw;border-radius:17px;overflow:hidden;
 font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;letter-spacing:-.01em;
-color:#2c2a26;background:rgba(251,250,247,.96);border:.5px solid rgba(50,42,28,.12);
+color:#2c2a26;background:#fbfaf7;border:.5px solid rgba(50,42,28,.12);
 box-shadow:0 .5px 0 rgba(255,255,255,.7) inset,0 10px 34px rgba(40,34,22,.16),0 1px 3px rgba(40,34,22,.08)}
 .head{display:flex;align-items:center;gap:6px;padding:11px 12px 10px;border-bottom:.5px solid rgba(50,42,28,.1)}
 .dots{display:flex;gap:7px;flex:1}
@@ -59,14 +59,14 @@ display:inline-flex;align-items:center;justify-content:center;color:rgba(60,55,4
 .btn{border:none;background:transparent;color:rgba(60,55,47,.6);font:inherit;font-size:11.5px;cursor:pointer;padding:3px 7px;border-radius:7px}
 .btn:hover{background:rgba(50,42,28,.07);color:#2c2a26}
 .add{display:flex;gap:8px;align-items:flex-end;padding:11px 12px 12px;border-top:.5px solid rgba(50,42,28,.1)}
-textarea{flex:1;resize:vertical;min-height:36px;font:13px/1.45 inherit;font-family:inherit;border:.5px solid rgba(50,42,28,.16);
+textarea{flex:1;resize:vertical;min-height:36px;font-family:inherit;font-size:13px;line-height:1.45;border:.5px solid rgba(50,42,28,.16);
 border-radius:10px;padding:8px 10px;color:#2c2a26;background:rgba(255,255,255,.66)}
 textarea:focus{outline:none;border-color:#2c2a26;box-shadow:0 0 0 3px rgba(44,40,34,.14)}
-.primary{border:none;background:#2c2a26;color:#fdfbf7;cursor:pointer;border-radius:10px;padding:9px 15px;font:590 12.5px/1 inherit;font-family:inherit}
+.primary{border:none;background:#2c2a26;color:#fdfbf7;cursor:pointer;border-radius:10px;padding:9px 15px;font-family:inherit;font-size:12.5px;font-weight:590;line-height:1}
 .badge{position:absolute;min-width:13px;height:13px;padding:0 3px;border-radius:999px;pointer-events:none;
 font:600 9px/13px -apple-system,system-ui,sans-serif;text-align:center;color:#fdfbf7;background:rgba(60,55,47,.7)}
 @media (prefers-color-scheme:dark){
-.card{color:#f0eee9;background:rgba(40,37,33,.96);border-color:rgba(255,255,255,.12)}
+.card{color:#f0eee9;background:#282521;border-color:rgba(255,255,255,.12)}
 .head,.add{border-color:rgba(255,255,255,.1)}
 .note{border-color:rgba(255,255,255,.08)}
 .icon,.btn{color:rgba(240,238,233,.6)}

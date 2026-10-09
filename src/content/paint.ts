@@ -81,7 +81,7 @@ export function createPainter(api: HighlightApi | null): Painter {
 }
 
 /**
- * Adds the four `::highlight()` rules as a constructed sheet, which a `style-src` CSP does not block.
+ * Adds the four `::highlight()` rules as a constructed sheet, so no <style> element enters the document.
  * Engines without constructed sheets predate the Highlight API too, so they need no rules.
  */
 export function adoptPaintStyles(doc: Document): void {
