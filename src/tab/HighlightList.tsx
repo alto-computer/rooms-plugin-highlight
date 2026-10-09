@@ -1,5 +1,5 @@
 import { PluginError, type RoomsPlugin } from "@alto-rooms/plugin-sdk";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { COLORS, ORDER, ORPHANS_PATH, parseIds, type Color, type Highlight } from "../model";
 import { collect, docFileOf, type Collection, type DocHighlights } from "./collect";
 
@@ -49,6 +49,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
     collecting.current = true;
     try {
       const collection = await collect(rooms);
+      performance.mark("rooms-highlight:collected");
       if (run === latest.current) setLoad({ kind: "ready", collection });
     } catch (e) {
       console.warn("[highlights] could not list highlights", e);
@@ -101,6 +102,14 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
       off();
     };
   }, [rooms, refresh, refreshOrphans]);
+
+  const listed = useRef(false);
+  useLayoutEffect(() => {
+    if (load.kind !== "ready" || listed.current) return;
+    listed.current = true;
+    performance.mark("rooms-highlight:listed");
+    requestAnimationFrame(() => setTimeout(() => performance.mark("rooms-highlight:painted")));
+  }, [load]);
 
   const docs = load.kind === "ready" ? load.collection.docs : [];
   const shown = useMemo(() => filterDocs(docs, { color, query: deferredQuery }), [docs, color, deferredQuery]);

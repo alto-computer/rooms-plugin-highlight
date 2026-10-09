@@ -201,7 +201,61 @@ test("the Highlights tab lists, filters and searches every document's highlights
   expect(errors.filter((e) => !e.includes("Failed to load resource")), "no errors").toEqual([]);
 });
 
-test("the tab lists 4,000 highlights across 200 documents without a long freeze", async ({ page, daemon, browserName }) => {
+/**
+ * Runs in every frame before its own scripts. Chromium reports long tasks; WebKit has no longtask
+ * entry type, so there a frame that comes over 100 ms after the one before counts as one.
+ */
+function watchLongTasks() {
+  const tasks: { start: number; duration: number; kind: string }[] = [];
+  (window as unknown as { __longTasks: typeof tasks }).__longTasks = tasks;
+  if (PerformanceObserver.supportedEntryTypes.includes("longtask")) {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) tasks.push({ start: e.startTime, duration: e.duration, kind: "long task" });
+    }).observe({ type: "longtask", buffered: true });
+    return;
+  }
+  let last = performance.now();
+  const frame = (t: number) => {
+    if (t - last > 100) tasks.push({ start: last, duration: t - last, kind: "frame gap" });
+    last = t;
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+type RenderRun = { bootMs: number; collectMs: number; commitMs: number; paintMs: number; listMs: number; longestMs: number; kind: string; rows: number; domRows: number };
+
+/** The tab's own marks from connect() to the first painted list, then long tasks from connect() through a scroll to the end. */
+const measureRender = (tab: FrameLocator, clickedAt: number): Promise<RenderRun> =>
+  tab.locator("body").evaluate(async (body, clickedAt) => {
+    const at = (name: string) => performance.getEntriesByName(name)[0].startTime;
+    const list = body.querySelector(".list")!;
+    for (let y = 0; y < list.scrollHeight; y += 2000) {
+      list.scrollTop = y;
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    const connected = at("rooms-highlight:connected");
+    const tasks = (window as unknown as { __longTasks: { start: number; duration: number; kind: string }[] }).__longTasks.filter((t) => t.start + t.duration > connected);
+    const longest = tasks.reduce((a, t) => (t.duration > a.duration ? t : a), { duration: 0, kind: "none" });
+    return {
+      bootMs: performance.timeOrigin + connected - clickedAt,
+      collectMs: at("rooms-highlight:collected") - connected,
+      commitMs: at("rooms-highlight:listed") - at("rooms-highlight:collected"),
+      paintMs: at("rooms-highlight:painted") - at("rooms-highlight:listed"),
+      listMs: at("rooms-highlight:painted") - connected,
+      longestMs: longest.duration,
+      kind: longest.kind,
+      rows: Number(body.querySelector(".total")?.textContent),
+      domRows: body.querySelectorAll(".hl").length,
+    };
+  }, clickedAt);
+
+const p95 = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.ceil(xs.length * 0.95) - 1];
+const RENDER_RUNS = 7;
+
+test("the tab lists 4,000 highlights across 200 documents within 500 ms and without a long task", async ({ page, daemon, browserName }) => {
+  test.setTimeout(180_000);
   await daemon.createRoom("Bench");
   await daemon.write("Bench/one.html", owl("One real document."));
   await installHighlight(daemon);
@@ -219,33 +273,29 @@ test("the tab lists 4,000 highlights across 200 documents without a long freeze"
     }));
     await daemon.write(`${DATA}/docs/doc${String(d).padStart(3, "0")}/highlights.json`, JSON.stringify({ version: 1, title: `Doc ${d}`, highlights }));
   }
+  await page.addInitScript(watchLongTasks);
   await page.goto("/");
   await turnOn(page);
-  const t0 = Date.now();
-  await openTab(page);
   const tab = tabFrame(page);
-  await expect(tab.locator(".quote")).toHaveCount(4000, { timeout: 15000 });
-  const listMs = Date.now() - t0;
-  const longest = await tab.locator("body").evaluate(async () => {
-    const tasks: number[] = [];
-    const po = new PerformanceObserver((l) => l.getEntries().forEach((e) => tasks.push(e.duration)));
-    try {
-      po.observe({ type: "longtask", buffered: false });
-    } catch {
-      return -1;
-    }
-    const list = document.querySelector(".list")!;
-    for (let y = 0; y < list.scrollHeight; y += 2000) {
-      list.scrollTop = y;
-      await new Promise((r) => requestAnimationFrame(() => r(null)));
-    }
-    await new Promise((r) => setTimeout(r, 100));
-    po.disconnect();
-    return Math.max(0, ...tasks);
-  });
-  console.log(`[lane] ${browserName} 4000 rows listed in ${listMs} ms from the sidebar click; longest task while scrolling ${longest} ms (-1: no longtask API)`);
+  const runs: RenderRun[] = [];
+  for (let i = 0; i < RENDER_RUNS; i++) {
+    await expect(tab.locator("body"), "each run boots a new frame").toHaveCount(0);
+    const clickedAt = Date.now();
+    await openTab(page);
+    await expect.poll(() => tab.locator("body").evaluate(() => performance.getEntriesByName("rooms-highlight:painted").length), { timeout: 15000 }).toBe(1);
+    const run = await measureRender(tab, clickedAt);
+    console.log(`[lane] ${browserName} run ${i + 1}: ${JSON.stringify(run, (_, v) => (typeof v === "number" ? Math.round(v) : v))}`);
+    expect(run.rows).toBe(4000);
+    runs.push(run);
+    if (i < RENDER_RUNS - 1) await page.getByRole("tablist", { name: "Tabs" }).locator("[role=presentation]", { has: page.getByRole("tab", { name: "Highlights", exact: true }) }).getByRole("button", { name: "Close tab" }).click();
+  }
+  const listP95 = p95(runs.map((r) => r.listMs));
+  const longest = Math.max(...runs.map((r) => r.longestMs));
+  console.log(`[lane] ${browserName} ${RENDER_RUNS} runs: list render p95 ${Math.round(listP95)} ms (connect to painted), frame boot p95 ${Math.round(p95(runs.map((r) => r.bootMs)))} ms (click to connect), longest ${runs[0].kind === "frame gap" ? "frame gap" : "long task"} ${Math.round(longest)} ms`);
+
   await tab.getByRole("searchbox", { name: "Search highlights" }).fill("note 199-0");
   await expect(tab.locator(".quote")).toHaveCount(1);
   await page.screenshot({ path: `${SHOTS}/${browserName}-tab-scale.png` });
-  expect(longest).toBeLessThan(100);
+  expect(listP95, "p95 list render").toBeLessThanOrEqual(500);
+  expect(longest, "longest task during render and scroll").toBeLessThanOrEqual(100);
 });
