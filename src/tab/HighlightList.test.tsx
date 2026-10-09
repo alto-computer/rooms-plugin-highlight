@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { RoomsPlugin } from "@alto-rooms/plugin-sdk";
+import { PluginError, type RoomsPlugin } from "@alto-rooms/plugin-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HighlightList } from "./HighlightList";
 
@@ -111,6 +111,42 @@ describe("HighlightList", () => {
     fireEvent.click(screen.getByText("a removed doc's line"));
     expect(screen.getByText("a removed doc's line").closest("button")).toBeNull();
     expect(f.open).toHaveBeenCalledTimes(1);
+  });
+
+  it("says why a document did not open", async () => {
+    const f = await mount();
+    f.open.mockRejectedValueOnce(new PluginError("timeout"));
+    await act(async () => void fireEvent.click(screen.getByText("p95 is 118 ms under load")));
+    expect(screen.getByRole("status").textContent).toBe("That document could not be opened. Try again.");
+    f.open.mockRejectedValueOnce(new PluginError("not_found"));
+    await act(async () => void fireEvent.click(screen.getByText("p95 is 118 ms under load")));
+    expect(screen.getByRole("status").textContent).toBe("That document is no longer in a room.");
+  });
+
+  it("keeps each document's rows a list for VoiceOver, which drops list-style: none lists", async () => {
+    await mount();
+    for (const ul of document.querySelectorAll("ul")) expect(ul.getAttribute("role")).toBe("list");
+  });
+
+  it("reads only that document's lost text when it changes", async () => {
+    const files: Record<string, string> = { ...FILES };
+    const f = fakeRooms(files);
+    render(<HighlightList rooms={f.rooms} />);
+    await screen.findByText("the cache never misses");
+    expect(screen.getAllByText("Text not found")).toHaveLength(1);
+    const read = f.rooms.storage.read as ReturnType<typeof vi.fn>;
+    const list = f.rooms.storage.list as ReturnType<typeof vi.fn>;
+    read.mockClear();
+    list.mockClear();
+    files["docs/k1/orphans.json"] = JSON.stringify(["b"]);
+    await act(async () => {
+      f.change("docs/k1/orphans.json");
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    expect(screen.getByText("the cache never misses").closest(".hl")!.textContent).toContain("Text not found");
+    expect(screen.getByText("p95 is 118 ms under load").closest(".hl")!.textContent).not.toContain("Text not found");
+    expect(read.mock.calls).toEqual([["docs/k1/orphans.json"]]);
+    expect(list).not.toHaveBeenCalled();
   });
 
   it("lists again when a document's highlights change", async () => {

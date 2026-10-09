@@ -29,6 +29,12 @@ export type CollectContext = Pick<RoomsPlugin, "storage" | "rooms" | "artifacts"
 
 const FILE = /^docs\/([A-Za-z0-9._-]+)\/([^/]+)$/;
 
+/** The document and file name of a path under `docs/`, or null for any other path. */
+export function docFileOf(path: string): { fileKey: string; name: string } | null {
+  const m = FILE.exec(path);
+  return m ? { fileKey: m[1], name: m[2] } : null;
+}
+
 const newestFirst = (a: Highlight, b: Highlight) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0);
 
 async function linkedDocs(ctx: CollectContext): Promise<Map<string, { title: string; rooms: string[] }>> {
@@ -49,8 +55,8 @@ export async function collect(ctx: CollectContext): Promise<Collection> {
   const [paths, linked] = await Promise.all([ctx.storage.list("docs/"), linkedDocs(ctx)]);
   const listed = new Set(paths);
   const keys = paths.flatMap((p) => {
-    const m = FILE.exec(p);
-    return m && m[2] === DOC_PATH ? [m[1]] : [];
+    const f = docFileOf(p);
+    return f?.name === DOC_PATH ? [f.fileKey] : [];
   });
   const read = await Promise.all(
     keys.map(async (fileKey) => {

@@ -1,7 +1,7 @@
-import type { RoomsPlugin } from "@alto-rooms/plugin-sdk";
+import { PluginError, type RoomsPlugin } from "@alto-rooms/plugin-sdk";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { COLORS, ORDER, type Color, type Highlight } from "../model";
-import { collect, type Collection, type DocHighlights } from "./collect";
+import { COLORS, ORDER, ORPHANS_PATH, parseIds, type Color, type Highlight } from "../model";
+import { collect, docFileOf, type Collection, type DocHighlights } from "./collect";
 
 /** Writes from a document come in bursts (a save, then its orphan report); read once they settle. */
 const REFRESH_DELAY_MS = 150;
@@ -43,30 +43,64 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
   const [notice, setNotice] = useState<string | null>(null);
 
   const latest = useRef(0);
+  const collecting = useRef(false);
   const refresh = useCallback(async () => {
     const run = ++latest.current;
+    collecting.current = true;
     try {
       const collection = await collect(rooms);
       if (run === latest.current) setLoad({ kind: "ready", collection });
     } catch (e) {
       console.warn("[highlights] could not list highlights", e);
       if (run === latest.current) setLoad((l) => (l.kind === "ready" ? l : { kind: "failed" }));
+    } finally {
+      if (run === latest.current) collecting.current = false;
     }
   }, [rooms]);
+
+  /** The newest orphan read per document; an older one that lands later is dropped. */
+  const orphanReads = useRef(new Map<string, number>());
+  const refreshOrphans = useCallback(
+    async (fileKey: string) => {
+      const run = latest.current;
+      const read = (orphanReads.current.get(fileKey) ?? 0) + 1;
+      orphanReads.current.set(fileKey, read);
+      let raw: string | null;
+      try {
+        raw = await rooms.storage.read(`docs/${fileKey}/${ORPHANS_PATH}`);
+      } catch (e) {
+        console.warn("[highlights] could not read lost text", e);
+        return;
+      }
+      if (run !== latest.current || orphanReads.current.get(fileKey) !== read) return;
+      const orphans = new Set(parseIds(raw));
+      setLoad((l) =>
+        l.kind === "ready" ? { ...l, collection: { ...l.collection, docs: l.collection.docs.map((d) => (d.fileKey === fileKey ? { ...d, orphans } : d)) } } : l,
+      );
+    },
+    [rooms],
+  );
 
   useEffect(() => {
     void refresh();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const off = rooms.storage.onChange((path) => {
       if (!path.startsWith("docs/")) return;
+      const file = docFileOf(path);
+      // A listing in flight or about to start may have read this file before it changed, so it
+      // lists again; otherwise only this document's lost text is read.
+      if (file?.name === ORPHANS_PATH && !timer && !collecting.current) return void refreshOrphans(file.fileKey);
       clearTimeout(timer);
-      timer = setTimeout(() => void refresh(), REFRESH_DELAY_MS);
+      timer = setTimeout(() => {
+        timer = undefined;
+        void refresh();
+      }, REFRESH_DELAY_MS);
     });
     return () => {
       clearTimeout(timer);
       off();
     };
-  }, [rooms, refresh]);
+  }, [rooms, refresh, refreshOrphans]);
 
   const docs = load.kind === "ready" ? load.collection.docs : [];
   const shown = useMemo(() => filterDocs(docs, { color, query: deferredQuery }), [docs, color, deferredQuery]);
@@ -83,8 +117,12 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
       await rooms.open(highlightId ? { fileKey, anchor: { highlightId } } : { fileKey });
     } catch (e) {
       console.warn("[highlights] could not open the document", e);
-      setNotice("That document is no longer in a room.");
-      void refresh();
+      if (e instanceof PluginError && e.code === "not_found") {
+        setNotice("That document is no longer in a room.");
+        void refresh();
+      } else {
+        setNotice("That document could not be opened. Try again.");
+      }
     }
   };
 
@@ -174,7 +212,7 @@ function DocSection({ doc, open }: { doc: DocHighlights; open: (fileKey: string,
         )}
         <span className="doc-where">{removed ? "Doc removed" : doc.rooms.join(" · ")}</span>
       </header>
-      <ul className="items">
+      <ul className="items" role="list">
         {doc.highlights.map((h) => (
           <li key={h.id}>
             <Row h={h} orphan={doc.orphans.has(h.id)} onOpen={removed ? undefined : () => open(doc.fileKey, h.id)} />
