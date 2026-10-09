@@ -43,6 +43,14 @@ bun run package        # → highlight.zip
 
 To try a build in the app, copy `dist/` to `~/rooms/.rooms/plugins/highlight/`. See the [plugin guide](https://github.com/alto-computer/alto-rooms/blob/main/docs/plugins.md).
 
+### End to end
+
+`e2e/highlight-plugins.spec.ts` drives a built plugin through an alto-rooms checkout's Playwright harness: select, the colors in the bar, paint, notes, reload and restore, a late re-render, and a hostile document. Copy it to `apps/desktop/e2e/lanes/` there, then run from `apps/desktop`:
+
+```sh
+HIGHLIGHT_DIST=<this repo>/dist bunx playwright test e2e/lanes/highlight-plugins.spec.ts --project chromium --project webkit
+```
+
 ### The SDK
 
 `connectContent` arrives in `@alto-rooms/plugin-sdk` 0.3.0, which is not released yet. Until it is, `vendor/plugin-sdk/` holds a copy of `packages/plugin-sdk/src` from alto-rooms `a21e26b`, and `package.json` depends on it. Once the `plugin-sdk-v0.3.0` release exists, replace the dependency line with the line below, delete `vendor/`, and run `bun install`:

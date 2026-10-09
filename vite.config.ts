@@ -9,5 +9,5 @@ export default defineConfig({
     target: "es2022",
     lib: { entry: "src/content/main.ts", formats: ["iife"], name: "roomsHighlight", fileName: () => "content.js" },
   },
-  test: { environment: "jsdom" },
+  test: { environment: "jsdom", include: ["src/**/*.test.ts"] },
 });
