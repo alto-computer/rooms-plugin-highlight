@@ -65,6 +65,12 @@ describe("parseDocFile", () => {
     expect(doc.highlights[0].color).toBe("agree");
   });
 
+  it("keeps the first of two notes with one id", () => {
+    const note = { id: "n1", body: "first", createdAt: T0 };
+    const doc = parseDocFile(file([{ ...valid, annotations: [note, { ...note, body: "forged twin" }] }]));
+    expect(doc.highlights[0].annotations.map((a) => a.body)).toEqual(["first"]);
+  });
+
   it("turns a Hi-Lighter record's old note field into an annotation", () => {
     const { annotations: _, ...old } = valid;
     const doc = parseDocFile(file([{ ...old, url: "https://example.com", title: "Old", note: "from before" }]));

@@ -82,9 +82,7 @@ export function parseHighlight(v: unknown): Highlight | null {
   const createdAt = str(o.createdAt, 40);
   if (!id || !text?.trim() || !isColor(o.color) || !createdAt) return null;
   const updatedAt = str(o.updatedAt, 40) ?? createdAt;
-  const annotations = Array.isArray(o.annotations)
-    ? o.annotations.map(parseAnnotation).filter((a): a is Annotation => a !== null)
-    : legacyNote(o, createdAt, updatedAt);
+  const annotations = Array.isArray(o.annotations) ? firstById(o.annotations.map(parseAnnotation)) : legacyNote(o, createdAt, updatedAt);
   return {
     id,
     color: o.color,
@@ -98,6 +96,13 @@ export function parseHighlight(v: unknown): Highlight | null {
   };
 }
 
+/** Drops nulls and every entry whose id an earlier entry already has. */
+function firstById<T extends { id: string }>(items: readonly (T | null)[]): T[] {
+  const byId = new Map<string, T>();
+  for (const x of items) if (x && !byId.has(x.id)) byId.set(x.id, x);
+  return [...byId.values()];
+}
+
 /** Reads a stored file, or null when it is not a record at all. Bad entries are dropped. */
 export function readDocFile(raw: string | null): DocFile | null {
   let v: unknown;
@@ -109,9 +114,7 @@ export function readDocFile(raw: string | null): DocFile | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
   if (!Array.isArray(o.highlights)) return null;
-  const byId = new Map<string, Highlight>();
-  for (const h of o.highlights.slice(0, HIGHLIGHTS_MAX).map(parseHighlight)) if (h && !byId.has(h.id)) byId.set(h.id, h);
-  return { version: 1, title: str(o.title, 500) ?? "", highlights: [...byId.values()] };
+  return { version: 1, title: str(o.title, 500) ?? "", highlights: firstById(o.highlights.slice(0, HIGHLIGHTS_MAX).map(parseHighlight)) };
 }
 
 /** Reads the stored file. Anything unreadable becomes an empty record. */
