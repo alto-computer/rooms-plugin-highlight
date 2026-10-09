@@ -80,13 +80,18 @@ export function createPainter(api: HighlightApi | null): Painter {
   };
 }
 
+let sheet: CSSStyleSheet | undefined;
+
 /**
- * Adds the four `::highlight()` rules as a constructed sheet, so no <style> element enters the document.
+ * Adds the four `::highlight()` rules as a constructed sheet, so no <style> element enters the
+ * document, unless it is already there: a document that reassigns adoptedStyleSheets drops it.
  * Engines without constructed sheets predate the Highlight API too, so they need no rules.
  */
 export function adoptPaintStyles(doc: Document): void {
   if (!Array.isArray(doc.adoptedStyleSheets)) return;
-  const sheet = new CSSStyleSheet();
-  sheet.replaceSync(PAINT_CSS);
-  doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet];
+  if (!sheet) {
+    sheet = new CSSStyleSheet();
+    sheet.replaceSync(PAINT_CSS);
+  }
+  if (!doc.adoptedStyleSheets.includes(sheet)) doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet];
 }

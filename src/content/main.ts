@@ -27,6 +27,7 @@ const now = () => new Date().toISOString();
 const newId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 function repaint(): void {
+  adoptPaintStyles(document);
   if (!document.body) return;
   performance.mark("rooms-highlight:restore-start");
   restore(document.body, file.highlights, painter);

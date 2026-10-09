@@ -46,6 +46,8 @@ async function boot(existing?: string) {
   app.read = vi.fn(async (p: string) => app.files.get(p) ?? null);
   app.write = vi.fn(async (p: string, t: string) => void app.files.set(p, t));
   document.title = "Fox doc";
+  // A fresh body, so the observers of scripts booted by earlier tests stop firing.
+  document.body.replaceWith(document.createElement("body"));
   document.body.innerHTML = `<p>${FOX}</p>`;
   await import("./main");
   await flush();
@@ -108,6 +110,24 @@ describe("the content script", () => {
     app.onAction!("agree", null);
     await flush();
     expect(app.write).not.toHaveBeenCalled();
+  });
+
+  it("adds the paint rules back when the document replaces its adopted sheets", async () => {
+    Object.defineProperty(document, "adoptedStyleSheets", { value: [], writable: true, configurable: true });
+    try {
+      await boot();
+      const painted = () => document.adoptedStyleSheets.filter((s) => [...s.cssRules].some((r) => r.cssText.includes("::highlight(rooms-hl-agree)"))).length;
+      expect(painted()).toBe(1);
+      document.adoptedStyleSheets = [];
+      document.body.append(document.createElement("p"));
+      await new Promise((r) => setTimeout(r, 300));
+      expect(painted(), "re-added on the next repaint").toBe(1);
+      app.onDataChanged!("highlights.json");
+      await flush();
+      expect(painted(), "never added twice").toBe(1);
+    } finally {
+      delete (document as { adoptedStyleSheets?: unknown }).adoptedStyleSheets;
+    }
   });
 
   it("reads the record again when another frame changes it", async () => {
