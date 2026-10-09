@@ -1,21 +1,29 @@
 {
   "name": "rooms-plugin-highlight",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Highlight text in Alto Rooms documents and attach notes to it, as an Alto Rooms plugin.",
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "vite build --watch",
-    "build": "tsc --noEmit && vite build",
+    "dev": "vite build --watch & vite build --mode content --watch",
+    "build": "tsc --noEmit && vite build && vite build --mode content",
     "test": "vitest run",
     "package": "bun run build && cd dist && zip -qr ../highlight.zip ."
   },
   "dependencies": {
-    "@alto-rooms/plugin-sdk": "file:./vendor/plugin-sdk"
+    "@alto-rooms/plugin-sdk": "file:./vendor/plugin-sdk",
+    "@tanstack/react-virtual": "3.14.13",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.4",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.2",
     "jsdom": "^30.1.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.2",

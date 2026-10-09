@@ -82,9 +82,7 @@ export function parseHighlight(v: unknown): Highlight | null {
   const createdAt = str(o.createdAt, 40);
   if (!id || !text?.trim() || !isColor(o.color) || !createdAt) return null;
   const updatedAt = str(o.updatedAt, 40) ?? createdAt;
-  const annotations = Array.isArray(o.annotations)
-    ? o.annotations.map(parseAnnotation).filter((a): a is Annotation => a !== null)
-    : legacyNote(o, createdAt, updatedAt);
+  const annotations = Array.isArray(o.annotations) ? firstById(o.annotations.map(parseAnnotation)) : legacyNote(o, createdAt, updatedAt);
   return {
     id,
     color: o.color,
@@ -98,21 +96,45 @@ export function parseHighlight(v: unknown): Highlight | null {
   };
 }
 
-/** Reads the stored file. Anything unreadable becomes an empty record; bad entries are dropped. */
-export function parseDocFile(raw: string | null): DocFile {
+/** Drops nulls and every entry whose id an earlier entry already has. */
+function firstById<T extends { id: string }>(items: readonly (T | null)[]): T[] {
+  const byId = new Map<string, T>();
+  for (const x of items) if (x && !byId.has(x.id)) byId.set(x.id, x);
+  return [...byId.values()];
+}
+
+/** Reads a stored file, or null when it is not a record at all. Bad entries are dropped. */
+export function readDocFile(raw: string | null): DocFile | null {
   let v: unknown;
   try {
     v = raw ? JSON.parse(raw) : null;
   } catch {
-    return emptyDoc();
+    return null;
   }
-  if (!v || typeof v !== "object") return emptyDoc();
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
-  const list = Array.isArray(o.highlights) ? o.highlights.slice(0, HIGHLIGHTS_MAX) : [];
-  const byId = new Map<string, Highlight>();
-  for (const h of list.map(parseHighlight)) if (h && !byId.has(h.id)) byId.set(h.id, h);
-  const highlights = [...byId.values()];
-  return { version: 1, title: str(o.title, 500) ?? "", highlights };
+  if (!Array.isArray(o.highlights)) return null;
+  return { version: 1, title: str(o.title, 500) ?? "", highlights: firstById(o.highlights.slice(0, HIGHLIGHTS_MAX).map(parseHighlight)) };
+}
+
+/** Reads the stored file. Anything unreadable becomes an empty record. */
+export const parseDocFile = (raw: string | null): DocFile => readDocFile(raw) ?? emptyDoc();
+
+/**
+ * The ids of a document's highlights whose text the content script could not find, as it last
+ * saw them. The document can write this file too, so it only ever labels rows.
+ */
+export const ORPHANS_PATH = "orphans.json";
+
+export function parseIds(raw: string | null): string[] {
+  let v: unknown;
+  try {
+    v = raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.slice(0, HIGHLIGHTS_MAX).filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= ID_MAX))].sort();
 }
 
 export const serialize = (doc: DocFile): string => JSON.stringify(doc);

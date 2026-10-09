@@ -1,10 +1,11 @@
 /*
  * The content script Rooms loads into every document a doc tab shows. It adds the four colors to
- * the app's selection bar, paints and stores highlights, and opens the card when one is clicked.
- * It runs from the top of <head>, before the body exists.
+ * the app's selection bar, paints and stores highlights, opens the card when one is clicked, and
+ * scrolls to a highlight the Highlights tab opened the document at. It runs from the top of
+ * <head>, before the body exists.
  */
 import { connectContent, type ContentSelection } from "@alto-rooms/plugin-sdk";
-import { applyEdit, COLORS, DOC_PATH, emptyDoc, isColor, newHighlight, newNote, ORDER, parseDocFile, serialize, TEXT_MAX, type Color, type DocFile, type Edit } from "../model";
+import { applyEdit, COLORS, DOC_PATH, emptyDoc, isColor, newHighlight, newNote, ORDER, ORPHANS_PATH, parseDocFile, parseIds, serialize, TEXT_MAX, type Color, type DocFile, type Edit } from "../model";
 import { buildIndex, quoteOf, rangeAt } from "./anchor";
 import { caretAt, hitTest } from "./hit";
 import { adoptPaintStyles, createPainter, nativeHighlightApi } from "./paint";
@@ -13,6 +14,7 @@ import { createSaver } from "./save";
 import { mountUi, type Ui } from "./ui";
 
 const NOTE_ACTION = "note";
+const FLASH_MS = 1200;
 
 const rooms = connectContent("highlight");
 const painter = createPainter(nativeHighlightApi());
@@ -25,6 +27,18 @@ const saver = createSaver(() => rooms.storage.write(DOC_PATH, serialize(file)));
 let ui: Ui | null = null;
 /** "Highlight + note" uses the last color picked, for this page only: the script has no storage of its own. */
 let lastColor: Color = "important";
+/** orphans.json as last read or written; null until read, and nothing is written before. */
+let storedOrphans: string | null = null;
+/** The set the last paint found, written once paints stop changing it for a moment. */
+let foundOrphans = "[]";
+const orphanSaver = createSaver(async () => {
+  const next = foundOrphans;
+  if (next === storedOrphans) return;
+  await rooms.storage.write(ORPHANS_PATH, next);
+  storedOrphans = next;
+});
+let started!: () => void;
+const whenStarted = new Promise<void>((resolve) => (started = resolve));
 
 const now = () => new Date().toISOString();
 const newId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -33,8 +47,9 @@ function repaint(): void {
   adoptPaintStyles(document);
   if (!document.body) return;
   performance.mark("rooms-highlight:restore-start");
-  restore(document.body, file.highlights, painter);
+  const { orphans } = restore(document.body, file.highlights, painter);
   performance.measure("rooms-highlight:restore", "rooms-highlight:restore-start");
+  reportOrphans(orphans);
   placeBadges();
   ui?.update(file.highlights);
 }
@@ -49,16 +64,25 @@ function placeBadges(): void {
   );
 }
 
+/** Tells the tab which highlights' text this document no longer has. */
+function reportOrphans(ids: string[]): void {
+  foundOrphans = JSON.stringify([...ids].sort());
+  if (storedOrphans !== null && foundOrphans !== storedOrphans) orphanSaver.changed();
+}
+
 async function load(): Promise<boolean> {
   const at = edits;
   await saver.settled();
   let read: DocFile;
+  const orphans = rooms.storage.read(ORPHANS_PATH).catch(() => undefined);
   try {
     read = parseDocFile(await rooms.storage.read(DOC_PATH));
   } catch (e) {
     console.warn("[highlights] could not read the highlights of this document", e);
     return false;
   }
+  const orphansRaw = await orphans;
+  if (orphansRaw !== undefined) storedOrphans = JSON.stringify(parseIds(orphansRaw));
   if (at !== edits) return true;
   file = read;
   repaint();
@@ -96,6 +120,28 @@ async function highlight(actionId: string, selection: ContentSelection | null): 
   if (withNote) ui?.openCard(h, range.getBoundingClientRect(), true);
 }
 
+const highlightIdOf = (anchor: unknown): string | null =>
+  anchor && typeof anchor === "object" && typeof (anchor as { highlightId?: unknown }).highlightId === "string" ? (anchor as { highlightId: string }).highlightId : null;
+
+/** Scrolls the highlight the tab asked for into view and flashes it. Its text may be gone. */
+async function reveal(anchor: unknown): Promise<void> {
+  const id = highlightIdOf(anchor);
+  if (!id) return;
+  await whenStarted;
+  if (!(await ensureLoaded())) return;
+  if (!painter.alive(id)) repaint();
+  const painted = painter.get(id);
+  if (!painted) return;
+  const { range } = painted;
+  const el = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+  // The element brings any scrolling container around it along; a paragraph taller than the
+  // window can still leave the range out of view, so the window centers the range itself.
+  el?.scrollIntoView({ block: "center" });
+  const r = range.getBoundingClientRect();
+  if (r.top < 0 || r.bottom > innerHeight) scrollBy({ top: r.top + r.height / 2 - innerHeight / 2 });
+  painter.flash(range, FLASH_MS);
+}
+
 function onClick(e: MouseEvent): void {
   if (!ui || ui.owns(e)) return;
   if (!document.getSelection()?.isCollapsed) return;
@@ -127,6 +173,7 @@ function start(): void {
   window.addEventListener("scroll", onLayout, { capture: true, passive: true });
   watchMutations(document.body, repaint);
   loaded = load();
+  started();
 }
 
 rooms.setActions([...ORDER.map((c) => ({ id: c, title: COLORS[c].label, color: COLORS[c].solid })), { id: NOTE_ACTION, title: "Highlight + note" }]);
@@ -134,6 +181,7 @@ rooms.onAction((id, selection) => void highlight(id, selection));
 rooms.onDataChanged((path) => {
   if (path === DOC_PATH) loaded = load();
 });
+rooms.onReveal((anchor) => void reveal(anchor));
 rooms.ready();
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
