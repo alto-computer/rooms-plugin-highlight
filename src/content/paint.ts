@@ -8,7 +8,8 @@ import { COLORS, ORDER, type Color } from "../model";
 /** The parts of `CSS.highlights` and `Highlight` the painter uses. */
 export interface HighlightApi {
   registry: { get(name: string): SetLike | undefined; set(name: string, h: SetLike): unknown };
-  create(): SetLike;
+  /** A Highlight with a higher `priority` paints over one with a lower. */
+  create(priority: number): SetLike;
 }
 interface SetLike {
   add(r: Range): unknown;
@@ -20,7 +21,7 @@ export const highlightName = (c: Color) => `rooms-hl-${c}`;
 
 export function nativeHighlightApi(): HighlightApi | null {
   if (typeof CSS === "undefined" || !("highlights" in CSS) || typeof Highlight === "undefined") return null;
-  return { registry: CSS.highlights, create: () => new Highlight() };
+  return { registry: CSS.highlights, create: (priority) => Object.assign(new Highlight(), { priority }) };
 }
 
 export const PAINT_CSS = ORDER.map(
@@ -49,11 +50,13 @@ export function createPainter(api: HighlightApi | null): Painter {
     if (!api) return undefined;
     let h = api.registry.get(highlightName(c));
     if (!h) {
-      h = api.create();
+      h = api.create(ORDER.indexOf(c));
       api.registry.set(highlightName(c), h);
     }
     return h;
   };
+  // Where two colors overlap, the later one in ORDER shows, whichever was used first.
+  ORDER.forEach(layer);
   const unpaint = (id: string) => {
     const p = painted.get(id);
     if (!p) return;
