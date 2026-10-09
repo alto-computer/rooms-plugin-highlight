@@ -1,6 +1,7 @@
 /*
- * Lane spec for rooms-plugin-highlight (F2-5), untracked: the built plugin from HIGHLIGHT_DIST
- * against this checkout's roomsd and web build. The file name matches the WebKit project.
+ * Lane spec for rooms-plugin-highlight (F2-5): the built plugin from HIGHLIGHT_DIST against an
+ * alto-rooms checkout's roomsd and web build, copied into its apps/desktop/e2e/lanes/. The file
+ * name matches the WebKit project.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -131,18 +132,18 @@ test("select, pick a color in the bar, paint, reload, restore", async ({ page, d
   await doc.locator("h1").click({ clickCount: 3 });
   await bar.getByRole("button", { name: "Highlight + note" }).click();
   await expect.poll(async () => (await paint(doc))["rooms-hl-idk"]?.length, { message: "Highlight + note paints in the last color" }).toBe(2);
+  const ui = doc.locator("rooms-highlight-ui");
+  await expect(ui, "Highlight + note opens the card").toHaveAttribute("data-card-open");
   await page.waitForTimeout(200);
   await page.keyboard.type("Check the fox");
   await page.keyboard.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter");
   await expect.poll(async () => (await stored(daemon, key)).highlights.find((h: { text: string }) => h.text.trim() === "Fox")?.annotations.map((a: { body: string }) => a.body)).toEqual(["Check the fox"]);
   await page.screenshot({ path: `${SHOTS}/${browserName}-5-card-note.png` });
   await page.keyboard.press("Escape");
-  const box = (await doc.locator("#text").boundingBox())!;
-  const frameBox = (await page.locator('iframe[title="Fox"]:not([aria-hidden])').boundingBox())!;
-  await page.mouse.click(box.x + 40, box.y + box.height / 2);
-  await page.waitForTimeout(200);
+  await expect(ui, "Escape closes the card").not.toHaveAttribute("data-card-open");
+  await doc.locator("#text").click({ position: { x: 40, y: 10 } });
+  await expect(ui, "clicking a highlight opens its card").toHaveAttribute("data-card-open");
   await page.screenshot({ path: `${SHOTS}/${browserName}-6-card-click.png` });
-  expect(frameBox.width).toBeGreaterThan(0);
   expect(await doc.locator("body").evaluate((b) => /<mark|rooms-highlight/i.test(b.innerHTML)), "nothing of the plugin in body").toBe(false);
   expect(errors.filter((e) => !e.includes("Failed to load resource")), "no errors").toEqual([]);
 });

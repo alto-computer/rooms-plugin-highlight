@@ -219,6 +219,8 @@ export function mountUi(doc: Document, actions: CardActions): Ui {
     card.replaceChildren(head, quote, notes, add);
     card.dataset.id = h.id;
     card.hidden = false;
+    // The root is closed, so the host carries whether the card is open, for tests and tooling.
+    host.toggleAttribute("data-card-open", true);
     open = { h, rect };
     place(rect);
     if (focusNote) ta.focus();
@@ -237,6 +239,7 @@ export function mountUi(doc: Document, actions: CardActions): Ui {
       open = null;
       card.hidden = true;
       card.replaceChildren();
+      host.removeAttribute("data-card-open");
     },
     get openId() {
       return open?.h.id ?? null;
