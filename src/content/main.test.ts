@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContentAction, ContentSelection } from "@alto-rooms/plugin-sdk";
+import { SAVE_DEBOUNCE_MS } from "./save";
 
 /** The app side of connectContent: storage in a Map, and the callbacks the script registered. */
 const app = vi.hoisted(() => ({
@@ -28,6 +29,8 @@ vi.mock("@alto-rooms/plugin-sdk", () => ({
 
 const FOX = "The quick brown fox jumps over the lazy dog.";
 const flush = () => new Promise((r) => setTimeout(r, 0));
+/** Past the save debounce, so a pending write has run. */
+const saved = () => new Promise((r) => setTimeout(r, SAVE_DEBOUNCE_MS + 50));
 
 function select(text: string): ContentSelection {
   const node = document.querySelector("p")!.firstChild as Text;
@@ -75,7 +78,7 @@ describe("the content script", () => {
   it("stores a highlight in highlights.json when a color is clicked", async () => {
     await boot();
     app.onAction!("agree", select("quick brown fox"));
-    await flush();
+    await saved();
     expect(app.write).toHaveBeenCalledTimes(1);
     expect(app.write.mock.calls[0][0]).toBe("highlights.json");
     const file = stored();
@@ -89,7 +92,7 @@ describe("the content script", () => {
   it("adds to the highlights already stored for the document", async () => {
     await boot(JSON.stringify({ version: 1, title: "Fox doc", highlights: [{ id: "old", color: "idk", text: "lazy dog", prefix: "", suffix: "", start: 35, annotations: [], createdAt: "2026-10-01T00:00:00.000Z" }] }));
     app.onAction!("important", select("quick"));
-    await flush();
+    await saved();
     expect(stored().highlights.map((h: { id: string; color: string }) => h.color)).toEqual(["idk", "important"]);
   });
 
@@ -100,7 +103,7 @@ describe("the content script", () => {
     app.onDataChanged!("highlights.json");
     await flush();
     app.onAction!("agree", select("quick"));
-    await flush();
+    await saved();
     expect(app.write).not.toHaveBeenCalled();
   });
 
@@ -108,7 +111,7 @@ describe("the content script", () => {
     await boot();
     app.onAction!("yellow", select("quick"));
     app.onAction!("agree", null);
-    await flush();
+    await saved();
     expect(app.write).not.toHaveBeenCalled();
   });
 

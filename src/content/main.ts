@@ -9,6 +9,7 @@ import { buildIndex, quoteOf, rangeAt } from "./anchor";
 import { caretAt, hitTest } from "./hit";
 import { adoptPaintStyles, createPainter, nativeHighlightApi } from "./paint";
 import { restore, watchMutations } from "./restore";
+import { createSaver } from "./save";
 import { mountUi, type Ui } from "./ui";
 
 const NOTE_ACTION = "note";
@@ -18,7 +19,7 @@ const painter = createPainter(nativeHighlightApi());
 let file: DocFile = emptyDoc();
 /** Resolves once the stored record is read; nothing is written before, so a failed read never erases it. */
 let loaded: Promise<boolean> = Promise.resolve(false);
-let writes: Promise<void> = Promise.resolve();
+const saver = createSaver(() => rooms.storage.write(DOC_PATH, serialize(file)));
 let ui: Ui | null = null;
 /** "Highlight + note" uses the last color picked, for this page only: the script has no storage of its own. */
 let lastColor: Color = "important";
@@ -67,8 +68,7 @@ async function ensureLoaded(): Promise<boolean> {
 function apply(edit: Edit): void {
   file = { ...applyEdit(file, edit, now()), title: document.title };
   repaint();
-  const text = serialize(file);
-  writes = writes.then(() => rooms.storage.write(DOC_PATH, text)).catch((e) => console.warn("[highlights] could not save", e));
+  saver.changed();
 }
 
 async function highlight(actionId: string, selection: ContentSelection | null): Promise<void> {
