@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContentAction, ContentSelection } from "@alto-rooms/plugin-sdk";
+import { RESTORE_DEBOUNCE_MS } from "./restore";
 import { SAVE_DEBOUNCE_MS } from "./save";
 
 /** The app side of connectContent: storage in a Map, and the callbacks the script registered. */
@@ -188,7 +189,7 @@ describe("the content script", () => {
 
   it("tells the tab which highlights' text is gone, and writes only when that changes", async () => {
     await boot(stored2({ id: "dog", text: "lazy dog", start: 35 }, { id: "gone", text: "a cat sleeps", start: 0 }));
-    await flush();
+    await saved();
     expect(app.files.get("orphans.json")).toBe('["gone"]');
     app.write.mockClear();
     app.onDataChanged!("highlights.json");
@@ -196,7 +197,18 @@ describe("the content script", () => {
     expect(app.write).not.toHaveBeenCalled();
 
     await boot(stored2({ id: "dog", text: "lazy dog", start: 35 }));
-    await flush();
+    await saved();
     expect(app.files.has("orphans.json"), "nothing written while every highlight is found").toBe(false);
+  });
+
+  it("does not write lost text that comes back before the write", async () => {
+    await boot(stored2({ id: "dog", text: "lazy dog", start: 35 }));
+    await saved();
+    const p = document.querySelector("p")!;
+    p.textContent = "The page is re-rendering.";
+    await new Promise((r) => setTimeout(r, RESTORE_DEBOUNCE_MS + 10));
+    p.textContent = FOX;
+    await new Promise((r) => setTimeout(r, RESTORE_DEBOUNCE_MS + SAVE_DEBOUNCE_MS + 50));
+    expect(app.files.has("orphans.json"), "a re-render that briefly loses the text writes nothing").toBe(false);
   });
 });

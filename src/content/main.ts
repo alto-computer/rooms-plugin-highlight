@@ -27,8 +27,16 @@ const saver = createSaver(() => rooms.storage.write(DOC_PATH, serialize(file)));
 let ui: Ui | null = null;
 /** "Highlight + note" uses the last color picked, for this page only: the script has no storage of its own. */
 let lastColor: Color = "important";
-/** orphans.json as last read or written, so it is written only when the set changes; null until read. */
+/** orphans.json as last read or written; null until read, and nothing is written before. */
 let storedOrphans: string | null = null;
+/** The set the last paint found, written once paints stop changing it for a moment. */
+let foundOrphans = "[]";
+const orphanSaver = createSaver(async () => {
+  const next = foundOrphans;
+  if (next === storedOrphans) return;
+  await rooms.storage.write(ORPHANS_PATH, next);
+  storedOrphans = next;
+});
 let started!: () => void;
 const whenStarted = new Promise<void>((resolve) => (started = resolve));
 
@@ -58,14 +66,8 @@ function placeBadges(): void {
 
 /** Tells the tab which highlights' text this document no longer has. */
 function reportOrphans(ids: string[]): void {
-  if (storedOrphans === null) return;
-  const next = JSON.stringify([...ids].sort());
-  if (next === storedOrphans) return;
-  const before = storedOrphans;
-  storedOrphans = next;
-  rooms.storage.write(ORPHANS_PATH, next).catch(() => {
-    if (storedOrphans === next) storedOrphans = before;
-  });
+  foundOrphans = JSON.stringify([...ids].sort());
+  if (storedOrphans !== null && foundOrphans !== storedOrphans) orphanSaver.changed();
 }
 
 async function load(): Promise<boolean> {
