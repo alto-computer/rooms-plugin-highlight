@@ -18,15 +18,20 @@ interface SetLike {
 }
 
 export const highlightName = (c: Color) => `rooms-hl-${c}`;
+/** Drawn over a highlight for a moment when the tab jumps to it. */
+export const FLASH_NAME = "rooms-hl-flash";
 
 export function nativeHighlightApi(): HighlightApi | null {
   if (typeof CSS === "undefined" || !("highlights" in CSS) || typeof Highlight === "undefined") return null;
   return { registry: CSS.highlights, create: (priority) => Object.assign(new Highlight(), { priority }) };
 }
 
-export const PAINT_CSS = ORDER.map(
-  (c) => `::highlight(${highlightName(c)}){background-color:${COLORS[c].bg};text-decoration:underline 1.5px ${COLORS[c].line};text-underline-offset:3px;color:inherit}`,
-).join("\n");
+export const PAINT_CSS = [
+  ...ORDER.map(
+    (c) => `::highlight(${highlightName(c)}){background-color:${COLORS[c].bg};text-decoration:underline 1.5px ${COLORS[c].line};text-underline-offset:3px;color:inherit}`,
+  ),
+  `::highlight(${FLASH_NAME}){background-color:rgba(44,40,34,.16);text-decoration:underline 2px rgba(44,40,34,.7);text-underline-offset:3px}`,
+].join("\n");
 
 export interface Painted {
   range: Range;
@@ -42,6 +47,8 @@ export interface Painter {
   /** Painted and still showing the same text in the document. */
   alive(id: string): boolean;
   entries(): IterableIterator<[string, Painted]>;
+  /** Draws the flash over `range` for `ms`, above every color. */
+  flash(range: Range, ms: number): void;
 }
 
 export function createPainter(api: HighlightApi | null): Painter {
@@ -80,6 +87,17 @@ export function createPainter(api: HighlightApi | null): Painter {
       return shown && !range.collapsed && range.startContainer.isConnected && range.endContainer.isConnected && range.toString() === p.text;
     },
     entries: () => painted.entries(),
+    flash(range, ms) {
+      if (!api) return;
+      let h = api.registry.get(FLASH_NAME);
+      if (!h) {
+        h = api.create(ORDER.length);
+        api.registry.set(FLASH_NAME, h);
+      }
+      const shown = h;
+      shown.add(range);
+      setTimeout(() => shown.delete(range), ms);
+    },
   };
 }
 

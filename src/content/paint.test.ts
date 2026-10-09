@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ORDER, type Color } from "../model";
-import { createPainter, highlightName, type HighlightApi } from "./paint";
+import { createPainter, FLASH_NAME, highlightName, PAINT_CSS, type HighlightApi } from "./paint";
 
 /** CSS.highlights as a Map; each Highlight a Set of ranges carrying its priority. */
 function fakeApi() {
@@ -40,5 +40,26 @@ describe("the painter", () => {
       return topColor(registry);
     });
     expect(tops).toEqual(["idk", "idk"]);
+  });
+
+  it("flashes a range above every color for a moment", () => {
+    vi.useFakeTimers();
+    try {
+      const { api, registry } = fakeApi();
+      const painter = createPainter(api);
+      painter.paint("a", "idk", range);
+      painter.flash(range, 1200);
+      const flash = registry.get(FLASH_NAME)!;
+      expect(flash.has(range)).toBe(true);
+      expect(flash.priority).toBeGreaterThan(Math.max(...ORDER.map((c) => registry.get(highlightName(c))!.priority)));
+      expect(PAINT_CSS).toContain(`::highlight(${FLASH_NAME})`);
+      vi.advanceTimersByTime(1199);
+      expect(flash.has(range)).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(flash.has(range)).toBe(false);
+      expect(registry.get(highlightName("idk"))!.has(range), "the paint stays").toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

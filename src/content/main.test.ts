@@ -10,6 +10,7 @@ const app = vi.hoisted(() => ({
   actions: [] as ContentAction[],
   onAction: null as ((id: string, s: ContentSelection | null) => void) | null,
   onDataChanged: null as ((path: string) => void) | null,
+  onReveal: null as ((anchor: unknown) => void) | null,
   ready: false,
 }));
 
@@ -22,6 +23,7 @@ vi.mock("@alto-rooms/plugin-sdk", () => ({
       setActions: (items: ContentAction[]) => (app.actions = items),
       onAction: (cb: typeof app.onAction) => ((app.onAction = cb), () => {}),
       onDataChanged: (cb: typeof app.onDataChanged) => ((app.onDataChanged = cb), () => {}),
+      onReveal: (cb: typeof app.onReveal) => ((app.onReveal = cb), () => {}),
       ready: () => (app.ready = true),
     };
   },
@@ -163,6 +165,38 @@ describe("the content script", () => {
     app.onDataChanged!("other.json");
     app.onDataChanged!("highlights.json");
     await flush();
-    expect(app.read.mock.calls).toEqual([["highlights.json"]]);
+    expect(app.read.mock.calls.map(([p]) => p).sort()).toEqual(["highlights.json", "orphans.json"]);
+  });
+
+  const T = "2026-10-01T00:00:00.000Z";
+  const stored2 = (...hs: { id: string; text: string; start: number }[]) =>
+    JSON.stringify({ version: 1, title: "Fox doc", highlights: hs.map((h) => ({ ...h, color: "idk", prefix: "", suffix: "", annotations: [], createdAt: T })) });
+
+  it("scrolls to the highlight the tab opened the document at", async () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled(this.tagName);
+    };
+    await boot(stored2({ id: "dog", text: "lazy dog", start: 35 }));
+    for (const forged of [null, "dog", { highlightId: 5 }, { highlightId: "nope" }]) app.onReveal!(forged);
+    await flush();
+    expect(scrolled).not.toHaveBeenCalled();
+    app.onReveal!({ highlightId: "dog" });
+    await flush();
+    expect(scrolled.mock.calls).toEqual([["P"]]);
+  });
+
+  it("tells the tab which highlights' text is gone, and writes only when that changes", async () => {
+    await boot(stored2({ id: "dog", text: "lazy dog", start: 35 }, { id: "gone", text: "a cat sleeps", start: 0 }));
+    await flush();
+    expect(app.files.get("orphans.json")).toBe('["gone"]');
+    app.write.mockClear();
+    app.onDataChanged!("highlights.json");
+    await saved();
+    expect(app.write).not.toHaveBeenCalled();
+
+    await boot(stored2({ id: "dog", text: "lazy dog", start: 35 }));
+    await flush();
+    expect(app.files.has("orphans.json"), "nothing written while every highlight is found").toBe(false);
   });
 });
