@@ -1,9 +1,12 @@
 {
   "id": "highlight",
   "name": "Highlights",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "0.7.0",
-  "description": "Highlight text in any document in four colors and attach notes. Highlights stay with the document.",
-  "permissions": ["artifact.content"],
-  "contentScripts": ["content.js"]
+  "description": "Highlight text in any document in four colors and attach notes, then find every highlight in one tab.",
+  "permissions": ["artifact.content", "rooms.read"],
+  "contentScripts": ["content.js"],
+  "slots": {
+    "tab": { "title": "Highlights", "icon": "notebook", "sidebar": true }
+  }
 }

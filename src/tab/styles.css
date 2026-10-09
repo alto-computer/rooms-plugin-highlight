@@ -1,0 +1,251 @@
+:root {
+  --ink: #1a1a1a;
+  --ink-2: #555;
+  --ink-3: #8a8a8a;
+  --line: #e6e6e6;
+  --panel: #f7f7f7;
+  --hover: #efefef;
+  color-scheme: light;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  font:
+    14px/1.45 system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  color: var(--ink);
+  background: #fff;
+}
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.muted {
+  color: var(--ink-3);
+  margin: 4px 0;
+}
+.pad {
+  padding: 4px 24px;
+}
+.small-print {
+  font-size: 12px;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 18px 24px 10px;
+}
+.top h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+.total {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 0 24px 12px;
+}
+.line {
+  flex: 1 1 220px;
+  max-width: 360px;
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #fff;
+}
+.colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.chip:hover {
+  background: var(--hover);
+}
+.chip[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.chip-count {
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+.chip[aria-pressed="true"] .chip-count {
+  color: rgba(255, 255, 255, 0.7);
+}
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--hl-solid);
+  flex: none;
+}
+
+.notice {
+  margin: 0 24px 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0 24px;
+}
+.doc {
+  margin: 0 24px 18px;
+  max-width: 760px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+.doc-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  padding: 0 2px 6px;
+}
+.doc-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.doc-title button:hover {
+  text-decoration: underline;
+}
+.doc-where {
+  font-size: 12px;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hl {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--hl-solid);
+  border-radius: 9px;
+  padding: 9px 12px 8px 11px;
+}
+button.hl:hover {
+  border-color: #d6d6d6;
+  border-left-color: var(--hl-solid);
+  background: #fcfcfb;
+}
+.hl.inert {
+  cursor: default;
+}
+.quote {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: var(--hl-bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+}
+.note {
+  font-size: 13px;
+  color: var(--ink-2);
+  padding-left: 9px;
+  border-left: 2px solid var(--line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.orphan {
+  color: #a0522d;
+}
+
+.message {
+  padding: 8px 24px;
+}
+.message p:first-child {
+  font-weight: 500;
+  margin: 0 0 4px;
+}
+.message button {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+.message button:hover {
+  background: var(--hover);
+}

@@ -1,13 +1,24 @@
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
-// Rooms loads content.js as a classic <script src> at the top of each document's <head>,
-// so it is one self-contained IIFE. public/manifest.json lands beside it.
-export default defineConfig({
-  build: {
-    outDir: "dist",
-    emptyOutDir: true,
-    target: "es2022",
-    lib: { entry: "src/content/main.ts", formats: ["iife"], name: "roomsHighlight", fileName: () => "content.js" },
-  },
-  test: { environment: "jsdom", include: ["src/**/*.test.ts"] },
-});
+// Two builds into one dist/. The default is the tab, served from /_plugins/highlight/, so every
+// URL in it is relative. `--mode content` adds content.js: Rooms loads it as a classic <script src>
+// at the top of each document's <head>, so it is one self-contained IIFE.
+export default defineConfig(({ mode }) =>
+  mode === "content"
+    ? {
+        publicDir: false,
+        build: {
+          outDir: "dist",
+          emptyOutDir: false,
+          target: "es2022",
+          lib: { entry: "src/content/main.ts", formats: ["iife"], name: "roomsHighlight", fileName: () => "content.js" },
+        },
+      }
+    : {
+        base: "./",
+        plugins: [react()],
+        build: { outDir: "dist", emptyOutDir: true, target: "es2022", modulePreload: false },
+        test: { environment: "jsdom", include: ["src/**/*.test.{ts,tsx}"] },
+      },
+);
