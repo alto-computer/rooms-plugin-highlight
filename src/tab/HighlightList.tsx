@@ -1,5 +1,6 @@
 import { PluginError, type RoomsPlugin } from "@alto-rooms/plugin-sdk";
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { COLORS, ORDER, ORPHANS_PATH, parseIds, type Color, type Highlight } from "../model";
 import { collect, docFileOf, type Collection, type DocHighlights } from "./collect";
 
@@ -120,20 +121,24 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
   }, [docs]);
   const total = [...counts.values()].reduce((a, b) => a + b, 0);
 
-  const open = async (fileKey: string, highlightId?: string) => {
-    setNotice(null);
-    try {
-      await rooms.open(highlightId ? { fileKey, anchor: { highlightId } } : { fileKey });
-    } catch (e) {
-      console.warn("[highlights] could not open the document", e);
-      if (e instanceof PluginError && e.code === "not_found") {
-        setNotice("That document is no longer in a room.");
-        void refresh();
-      } else {
-        setNotice("That document could not be opened. Try again.");
+  const open = useCallback(
+    async (fileKey: string, highlightId?: string) => {
+      setNotice(null);
+      try {
+        await rooms.open(highlightId ? { fileKey, anchor: { highlightId } } : { fileKey });
+      } catch (e) {
+        console.warn("[highlights] could not open the document", e);
+        if (e instanceof PluginError && e.code === "not_found") {
+          setNotice("That document is no longer in a room.");
+          void refresh();
+        } else {
+          setNotice("That document could not be opened. Try again.");
+        }
       }
-    }
-  };
+    },
+    [rooms, refresh],
+  );
+  const listRef = useRef<HTMLElement>(null);
 
   return (
     <div className="app">
@@ -177,7 +182,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
           {notice}
         </p>
       ) : null}
-      <main className="list">
+      <main className="list" ref={listRef}>
         {load.kind === "loading" ? <p className="muted pad">Loading…</p> : null}
         {load.kind === "failed" ? (
           <div className="message">
@@ -194,9 +199,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
           </div>
         ) : null}
         {total > 0 && !shown.length ? <p className="muted pad">No highlights match.</p> : null}
-        {shown.map((d) => (
-          <DocSection key={d.fileKey} doc={d} open={open} />
-        ))}
+        {shown.length ? <DocList docs={shown} open={open} scroller={listRef} /> : null}
         {load.kind === "ready" && load.collection.skipped ? (
           <p className="muted pad small-print">{plural(load.collection.skipped, "highlight file")} could not be read.</p>
         ) : null}
@@ -205,34 +208,86 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
   );
 }
 
-function DocSection({ doc, open }: { doc: DocHighlights; open: (fileKey: string, highlightId?: string) => void }) {
-  const removed = doc.rooms.length === 0;
+type Open = (fileKey: string, highlightId?: string) => void;
+
+/** One line of the windowed list: a document's header, or one of its rows. */
+type Item = { kind: "head"; doc: DocHighlights } | { kind: "row"; doc: DocHighlights; h: Highlight; last: boolean };
+
+const itemsOf = (docs: readonly DocHighlights[]): Item[] =>
+  docs.flatMap((doc) => [{ kind: "head", doc } as const, ...doc.highlights.map((h, i) => ({ kind: "row", doc, h, last: i === doc.highlights.length - 1 }) as const)]);
+
+/**
+ * Renders only the lines near the scroll position: thousands of rows took WebKit over half a
+ * second to lay out. The rendered lines keep their sections and lists, so each document stays a
+ * region of rows, and a document that is cut off at the top keeps its rows in its region.
+ */
+function DocList({ docs, open, scroller }: { docs: readonly DocHighlights[]; open: Open; scroller: RefObject<HTMLElement | null> }) {
+  const items = useMemo(() => itemsOf(docs), [docs]);
+  const virtual = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scroller.current,
+    estimateSize: (i) => (items[i].kind === "head" ? 30 : 78 + 22 * Math.min(items[i].h.annotations.length, 3)),
+    getItemKey: (i) => {
+      const it = items[i];
+      return it.kind === "head" ? `d:${it.doc.fileKey}` : `h:${it.doc.fileKey}:${it.h.id}`;
+    },
+    overscan: 10,
+  });
+  const lines = virtual.getVirtualItems();
+  const sections: { doc: DocHighlights; lines: typeof lines }[] = [];
+  for (const line of lines) {
+    const doc = items[line.index].doc;
+    const last = sections[sections.length - 1];
+    if (last?.doc === doc) last.lines.push(line);
+    else sections.push({ doc, lines: [line] });
+  }
   return (
-    <section className="doc" aria-label={doc.title}>
-      <header className="doc-head">
-        {removed ? (
-          <h2 className="doc-title">{doc.title}</h2>
-        ) : (
-          <h2 className="doc-title">
-            <button type="button" onClick={() => open(doc.fileKey)}>
-              {doc.title}
-            </button>
-          </h2>
-        )}
-        <span className="doc-where">{removed ? "Doc removed" : doc.rooms.join(" · ")}</span>
-      </header>
-      <ul className="items" role="list">
-        {doc.highlights.map((h) => (
-          <li key={h.id}>
-            <Row h={h} orphan={doc.orphans.has(h.id)} onOpen={removed ? undefined : () => open(doc.fileKey, h.id)} />
-          </li>
-        ))}
-      </ul>
-    </section>
+    <div className="window" style={{ height: virtual.getTotalSize() }}>
+      <div className="window-slice" style={{ transform: `translateY(${lines[0]?.start ?? 0}px)` }}>
+        {sections.map(({ doc, lines }) => {
+          const removed = doc.rooms.length === 0;
+          const rows = lines.filter((l) => items[l.index].kind === "row");
+          return (
+            <section key={doc.fileKey} className="doc" aria-label={doc.title}>
+              {lines[0] && items[lines[0].index].kind === "head" ? <DocHead doc={doc} open={removed ? undefined : open} index={lines[0].index} measure={virtual.measureElement} /> : null}
+              {rows.length ? (
+                <ul className="items" role="list">
+                  {rows.map((l) => {
+                    const { h, last } = items[l.index] as Extract<Item, { kind: "row" }>;
+                    return (
+                      <li key={l.key} className={last ? "last" : undefined} data-index={l.index} ref={virtual.measureElement}>
+                        <Row h={h} orphan={doc.orphans.has(h.id)} fileKey={doc.fileKey} open={removed ? undefined : open} />
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+            </section>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-function Row({ h, orphan, onOpen }: { h: Highlight; orphan: boolean; onOpen?: () => void }) {
+function DocHead({ doc, open, index, measure }: { doc: DocHighlights; open?: Open; index: number; measure: (el: Element | null) => void }) {
+  return (
+    <header className="doc-head" data-index={index} ref={measure}>
+      {open ? (
+        <h2 className="doc-title">
+          <button type="button" onClick={() => open(doc.fileKey)}>
+            {doc.title}
+          </button>
+        </h2>
+      ) : (
+        <h2 className="doc-title">{doc.title}</h2>
+      )}
+      <span className="doc-where">{open ? doc.rooms.join(" · ") : "Doc removed"}</span>
+    </header>
+  );
+}
+
+const Row = memo(function Row({ h, orphan, fileKey, open }: { h: Highlight; orphan: boolean; fileKey: string; open?: Open }) {
   const c = COLORS[h.color];
   const meta = [c.label, shortDate(h.createdAt), h.annotations.length ? plural(h.annotations.length, "note") : ""].filter(Boolean).join(" · ");
   const body = (
@@ -258,8 +313,8 @@ function Row({ h, orphan, onOpen }: { h: Highlight; orphan: boolean; onOpen?: ()
     </>
   );
   const style = { "--hl-solid": c.solid, "--hl-bg": c.bg } as CSSProperties;
-  return onOpen ? (
-    <button type="button" className="hl" style={style} onClick={onOpen}>
+  return open ? (
+    <button type="button" className="hl" style={style} onClick={() => open(fileKey, h.id)}>
       {body}
     </button>
   ) : (
@@ -267,4 +322,4 @@ function Row({ h, orphan, onOpen }: { h: Highlight; orphan: boolean; onOpen?: ()
       {body}
     </div>
   );
-}
+});

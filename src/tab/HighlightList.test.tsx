@@ -1,9 +1,17 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { PluginError, type RoomsPlugin } from "@alto-rooms/plugin-sdk";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HighlightList } from "./HighlightList";
 
-afterEach(cleanup);
+// jsdom has no layout, and the windowed list renders nothing in a zero-height scroller.
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(800);
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(600);
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const T = (d: number) => `2026-10-0${d}T10:00:00.000Z`;
 const h = (id: string, color: string, text: string, day: number, notes: string[] = []) => ({
@@ -111,6 +119,14 @@ describe("HighlightList", () => {
     fireEvent.click(screen.getByText("a removed doc's line"));
     expect(screen.getByText("a removed doc's line").closest("button")).toBeNull();
     expect(f.open).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not render a row again when only the search around it changes", async () => {
+    await mount();
+    const renders = vi.spyOn(Date, "parse");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search highlights" }), { target: { value: "cache" } });
+    await vi.waitFor(() => expect(rows()).toEqual(["the cache never misses", "p95 is 118 ms under load"]));
+    expect(renders, "each row formats its date once per render").not.toHaveBeenCalled();
   });
 
   it("says why a document did not open", async () => {

@@ -206,24 +206,24 @@ test("the Highlights tab lists, filters and searches every document's highlights
  * entry type, so there a frame that comes over 100 ms after the one before counts as one.
  */
 function watchLongTasks() {
-  const tasks: { start: number; duration: number; kind: string }[] = [];
+  const tasks: { start: number; duration: number }[] = [];
   (window as unknown as { __longTasks: typeof tasks }).__longTasks = tasks;
   if (PerformanceObserver.supportedEntryTypes.includes("longtask")) {
     new PerformanceObserver((list) => {
-      for (const e of list.getEntries()) tasks.push({ start: e.startTime, duration: e.duration, kind: "long task" });
+      for (const e of list.getEntries()) tasks.push({ start: e.startTime, duration: e.duration });
     }).observe({ type: "longtask", buffered: true });
     return;
   }
   let last = performance.now();
   const frame = (t: number) => {
-    if (t - last > 100) tasks.push({ start: last, duration: t - last, kind: "frame gap" });
+    if (t - last > 100) tasks.push({ start: last, duration: t - last });
     last = t;
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
 }
 
-type RenderRun = { bootMs: number; collectMs: number; commitMs: number; paintMs: number; listMs: number; longestMs: number; kind: string; rows: number; domRows: number };
+type RenderRun = { bootMs: number; collectMs: number; commitMs: number; paintMs: number; listMs: number; longestMs: number; watch: string; rows: number; domRows: number };
 
 /** The tab's own marks from connect() to the first painted list, then long tasks from connect() through a scroll to the end. */
 const measureRender = (tab: FrameLocator, clickedAt: number): Promise<RenderRun> =>
@@ -236,16 +236,15 @@ const measureRender = (tab: FrameLocator, clickedAt: number): Promise<RenderRun>
     }
     await new Promise((r) => setTimeout(r, 200));
     const connected = at("rooms-highlight:connected");
-    const tasks = (window as unknown as { __longTasks: { start: number; duration: number; kind: string }[] }).__longTasks.filter((t) => t.start + t.duration > connected);
-    const longest = tasks.reduce((a, t) => (t.duration > a.duration ? t : a), { duration: 0, kind: "none" });
+    const tasks = (window as unknown as { __longTasks: { start: number; duration: number }[] }).__longTasks.filter((t) => t.start + t.duration > connected);
     return {
       bootMs: performance.timeOrigin + connected - clickedAt,
       collectMs: at("rooms-highlight:collected") - connected,
       commitMs: at("rooms-highlight:listed") - at("rooms-highlight:collected"),
       paintMs: at("rooms-highlight:painted") - at("rooms-highlight:listed"),
       listMs: at("rooms-highlight:painted") - connected,
-      longestMs: longest.duration,
-      kind: longest.kind,
+      longestMs: Math.max(0, ...tasks.map((t) => t.duration)),
+      watch: PerformanceObserver.supportedEntryTypes.includes("longtask") ? "long task" : "frame gap",
       rows: Number(body.querySelector(".total")?.textContent),
       domRows: body.querySelectorAll(".hl").length,
     };
@@ -291,7 +290,7 @@ test("the tab lists 4,000 highlights across 200 documents within 500 ms and with
   }
   const listP95 = p95(runs.map((r) => r.listMs));
   const longest = Math.max(...runs.map((r) => r.longestMs));
-  console.log(`[lane] ${browserName} ${RENDER_RUNS} runs: list render p95 ${Math.round(listP95)} ms (connect to painted), frame boot p95 ${Math.round(p95(runs.map((r) => r.bootMs)))} ms (click to connect), longest ${runs[0].kind === "frame gap" ? "frame gap" : "long task"} ${Math.round(longest)} ms`);
+  console.log(`[lane] ${browserName} ${RENDER_RUNS} runs: list render p95 ${Math.round(listP95)} ms (connect to painted), frame boot p95 ${Math.round(p95(runs.map((r) => r.bootMs)))} ms (click to connect), longest ${runs[0].watch} ${Math.round(longest)} ms`);
 
   await tab.getByRole("searchbox", { name: "Search highlights" }).fill("note 199-0");
   await expect(tab.locator(".quote")).toHaveCount(1);

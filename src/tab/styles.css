@@ -139,20 +139,25 @@ input:focus-visible {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 0 24px;
+  padding: 0 0 24px;
+}
+.window {
+  position: relative;
+}
+.window-slice {
+  position: absolute;
+  inset: 0 0 auto;
 }
 .doc {
-  margin: 0 24px 18px;
+  margin: 0 24px;
   max-width: 760px;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 240px;
 }
 .doc-head {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 2px 10px;
-  padding: 0 2px 6px;
+  padding: 4px 2px 6px;
 }
 .doc-title {
   margin: 0;
@@ -173,9 +178,13 @@ input:focus-visible {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+}
+/* Spacing is padding, not margin or gap, so each measured line carries its own. */
+.items li {
+  padding-bottom: 6px;
+}
+.items li.last {
+  padding-bottom: 14px;
 }
 .hl {
   display: flex;
