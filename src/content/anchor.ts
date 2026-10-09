@@ -139,8 +139,8 @@ function findBetween(text: string, q: Quote): { start: number; end: number } | n
   let best: { start: number; end: number; d: number } | null = null;
   for (let p = text.indexOf(pre); p !== -1; p = text.indexOf(pre, p + 1)) {
     const start = p + pre.length;
-    const end = text.indexOf(suf, start + minGap);
-    if (end === -1 || end - start > maxGap) continue;
+    const end = text.indexOf(suf, start);
+    if (end === -1 || end - start < minGap || end - start > maxGap) continue;
     const d = q.start < 0 ? 0 : Math.abs(start - q.start);
     if (!best || d < best.d) best = { start, end, d };
   }

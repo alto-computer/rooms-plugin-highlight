@@ -55,6 +55,12 @@ describe("anchoring", () => {
     expect(anchorIn(q)).toEqual({ status: "fuzzy", text: "quick brown cat jumps over" });
   });
 
+  it("reports an orphan when the text shrank by more than half, not a span to a later copy of its suffix", () => {
+    const q = quote("quick brown fox jumps over");
+    setBody("<h1>Fox</h1><p>The fox the lazy dog near the river bank, the lazy dog near the barn.</p>");
+    expect(anchorIn(q)).toEqual({ status: "orphan", text: null });
+  });
+
   it("reports an orphan when the text was rewritten", () => {
     const q = quote("quick brown fox jumps over");
     setBody("<p>Totally different words now stand in this place entirely, nothing kept.</p>");
