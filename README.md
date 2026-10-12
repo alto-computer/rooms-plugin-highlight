@@ -2,7 +2,7 @@
 
 Highlight text in any [Alto Rooms](https://github.com/alto-computer/alto-rooms) document, chat answer or Journal note in four colors, and attach notes to each highlight. Highlights stay with the document, the answer or the note.
 
-The plugin is a content script, which Rooms loads into every document a doc tab shows (permission `artifact.content`), a hidden background page that reads and marks chat answers and notes (permission `surfaces.text`), and a **Highlights** tab that lists every highlight (permission `rooms.read`, to show each document's title and rooms). It needs Alto Rooms 0.7.0 or later.
+The plugin is a content script, which Rooms loads into every document a doc tab shows (permission `artifact.content`), a hidden background page that reads and marks chat answers and notes (permission `surfaces.text`), and a **Highlights** tab that lists every highlight (permission `rooms.read`, to show each document's title and rooms). It needs Alto Rooms 0.7.1 or later.
 
 ## Use
 
@@ -12,6 +12,8 @@ The plugin is a content script, which Rooms loads into every document a doc tab 
 - Select text in a chat answer, in a document's, a room's or a day's chat. The selection bar shows **Ask**, then the same four colors. Click a painted answer highlight for a menu: the four colors, **Delete**, and its notes, which you edit in the Highlights tab (the app draws only buttons over answers). Picking the notes item opens that highlight's notes the next time you open the tab, or at once when it is open.
 - Select text in a note in the Journal. The selection bar shows the same four colors (notes have no **Ask**). The paint sits behind the text, and the note's file never changes. Editing the note keeps each highlight on its words; one whose words you delete stays in the tab marked "Text not found", and paints again if the words come back. Renaming the note keeps its highlights. A click on a painted note highlight shows the same menu as over an answer.
 - Open **Highlights** from **Plugins** in the sidebar to see every highlight, grouped by document or chat, newest first. A document's chat highlights sit with the document's own, marked "Doc chat"; a room's chat is under the room, marked "Room chat"; a day's chat is under the day, marked "Day chat". Each note is a group of its own under its name, marked "Notes" with its day. Filter by color, or search quotes and notes. Click a highlight to open its document next to the tab, scrolled to the highlight, which flashes; an answer highlight opens its chat at the answer and flashes there, and a note highlight opens the note and flashes there. **Add a note** under an answer or note highlight edits its notes. A document no room links any more shows as "Doc removed", and a highlight whose text the document lost shows "Text not found".
+
+The Highlights tab takes the app's theme, light or dark, and follows it when the appearance changes: its page, cards, chips, inputs and text use the colours the app sends (SDK 0.7.0, `--rooms-*`). The four highlight colours stay the same in both schemes; text under each keeps at least 7.5:1 contrast on the app's dark pane and sheet. The card the content script draws inside a document keeps its own look, which follows the system's light or dark setting.
 
 Paint uses the CSS Custom Highlight API, so the document's own DOM, layout and scripts are untouched, and so are the app's answers. The card lives in a closed shadow root outside `<body>`.
 
@@ -74,10 +76,10 @@ HIGHLIGHT_DIST=<this repo>/dist bunx playwright test e2e/lanes/ --project chromi
 
 ### The SDK
 
-The background page uses `connectSurfaces` from `@alto-rooms/plugin-sdk` 0.6.0, which says it reads surface API 2: the app sends it notes and the scope names `artifact` and `session`, and gives each text a `version` that every paint names. `package.json` installs the SDK from its release tarball:
+The background page uses `connectSurfaces` from `@alto-rooms/plugin-sdk` 0.7.0, which says it reads surface API 2: the app sends it notes and the scope names `artifact` and `session`, and gives each text a `version` that every paint names. The tab's `connect()` puts the app's theme on its page as `--rooms-*` variables. `src/tab/styles.css` reads them only through the aliases in its `:root`, each with a light fallback for a page opened outside Rooms, and `src/tab/theme.test.ts` fails on a colour written anywhere else. `package.json` installs the SDK from its release tarball:
 
 ```json
-"@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.6.0/alto-rooms-plugin-sdk-0.6.0.tgz"
+"@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.7.0/alto-rooms-plugin-sdk-0.7.0.tgz"
 ```
 
 ## License

@@ -1,6 +1,6 @@
 {
   "name": "rooms-plugin-highlight",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Highlight text in Alto Rooms documents and attach notes to it, as an Alto Rooms plugin.",
   "license": "MIT",
@@ -12,7 +12,7 @@
     "package": "bun run build && cd dist && zip -qr ../highlight.zip ."
   },
   "dependencies": {
-    "@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.6.0/alto-rooms-plugin-sdk-0.6.0.tgz",
+    "@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.7.0/alto-rooms-plugin-sdk-0.7.0.tgz",
     "@tanstack/react-virtual": "3.14.13",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
