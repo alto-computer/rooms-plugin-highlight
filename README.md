@@ -74,7 +74,7 @@ HIGHLIGHT_DIST=<this repo>/dist bunx playwright test e2e/lanes/ --project chromi
 
 ### The SDK
 
-The background page uses `connectSurfaces` from `@alto-rooms/plugin-sdk` 0.6.0, which says it reads surface API 2: the app sends it notes and the scope names `artifact` and `session`, and gives each text a `version` that every paint names. 0.6.0 is not released yet. Until it is, `vendor/plugin-sdk/` holds a byte-for-byte copy of `packages/plugin-sdk` (its `package.json` and the files it lists) from alto-rooms `98958b3`, and `package.json` depends on it. Once the `plugin-sdk-v0.6.0` release exists, replace the dependency line with the line below, delete `vendor/`, and run `bun install`:
+The background page uses `connectSurfaces` from `@alto-rooms/plugin-sdk` 0.6.0, which says it reads surface API 2: the app sends it notes and the scope names `artifact` and `session`, and gives each text a `version` that every paint names. `package.json` installs the SDK from its release tarball:
 
 ```json
 "@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.6.0/alto-rooms-plugin-sdk-0.6.0.tgz"
