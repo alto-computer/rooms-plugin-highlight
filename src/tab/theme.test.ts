@@ -53,10 +53,10 @@ const contrast = (a: Rgba, b: Rgba) => {
 describe("the four highlight colours", () => {
   for (const [scheme, { surfaces, ink }] of Object.entries(SCHEMES)) {
     for (const surface of surfaces) {
-      it(`keep the ink at AA under their paint on ${scheme} ${surface}`, () => {
+      it(`keep the ink at 7.5:1 under their paint on ${scheme} ${surface}`, () => {
         for (const c of ORDER) {
           const painted = over(parse(COLORS[c].bg), parse(surface));
-          expect(contrast(parse(ink), painted), c).toBeGreaterThanOrEqual(4.5);
+          expect(contrast(parse(ink), painted), c).toBeGreaterThanOrEqual(7.5);
         }
       });
     }
