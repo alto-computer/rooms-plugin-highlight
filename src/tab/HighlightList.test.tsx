@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { PluginError, type RoomsPlugin } from "@alto-rooms/plugin-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { surfaceFile } from "../surfaces";
 import { HighlightList } from "./HighlightList";
 
 // jsdom has no layout, and the windowed list renders nothing in a zero-height scroller.
@@ -287,6 +288,42 @@ describe("HighlightList", () => {
       files["focus.json"] = JSON.stringify({ path: PATH, id: "x", at: Date.now() - 10 * 60_000 });
       await act(async () => f.change("focus.json"));
       expect(screen.queryByRole("textbox", { name: "New note" }), "a stale request is ignored").toBeNull();
+    });
+  });
+
+  describe("note highlights", () => {
+    const NOTE = { kind: "note" as const, date: "2026-10-05", name: "Plan.md" };
+    const PATH = surfaceFile(NOTE);
+    const withNote = (): Record<string, string> => ({ ...FILES, [PATH]: file("Plan.md", [h("y", "important", "ship on friday", 5)]) });
+
+    it("lists them under the note's name with Notes and the day, opens the note at the range, and edits their notes in the file", async () => {
+      const files = withNote();
+      const f = fakeRooms(files);
+      const storage = f.rooms.storage as unknown as Record<string, ReturnType<typeof vi.fn>>;
+      storage.write.mockImplementation(async (p: string, t: string) => void (files[p] = t));
+      render(<HighlightList rooms={f.rooms} />);
+      await screen.findByText("ship on friday");
+
+      const note = within(screen.getByRole("region", { name: "Plan" }));
+      expect(note.getByText(/^Notes · .*2026/)).toBeTruthy();
+      expect(note.queryByRole("button", { name: "Plan" }), "a note's title opens nothing on its own").toBeNull();
+      expect(note.getByText("ship on friday").closest(".hl")!.textContent).toMatch(/^ship on friday.*Important · .*2026$/);
+      fireEvent.click(note.getByText("ship on friday"));
+      expect(f.open).toHaveBeenCalledWith({ surface: NOTE, rangeId: "y" });
+
+      fireEvent.click(note.getByRole("button", { name: "Add a note" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "New note" }), { target: { value: "move to monday?" } });
+      await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Add" })));
+      const stored = JSON.parse(files[PATH]);
+      expect(stored.title, "the tab keeps the name the file was made from").toBe("Plan.md");
+      expect(stored.highlights[0].annotations.map((a: { body: string }) => a.body)).toEqual(["move to monday?"]);
+    });
+
+    it("says when the note is gone", async () => {
+      const f = await mount(withNote());
+      f.open.mockRejectedValueOnce(new PluginError("not_found"));
+      await act(async () => void fireEvent.click(screen.getByText("ship on friday")));
+      expect(screen.getByRole("status").textContent).toBe("That note is no longer in the Journal.");
     });
   });
 });

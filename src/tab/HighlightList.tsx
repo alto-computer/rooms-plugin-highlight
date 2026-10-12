@@ -1,9 +1,9 @@
 import { PluginError, type RoomsPlugin } from "@alto-rooms/plugin-sdk";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { ANSWERS, CHAT_LABEL, editAnswer, FOCUS_PATH, parseFocus, Serial } from "../answers";
 import { COLORS, newId, newNote, ORDER, ORPHANS_PATH, parseIds, type Color, type Edit, type Highlight } from "../model";
-import { answerRowKey, collect, docFileOf, docRowKey, rowKey, type Collection, type Found, type Group, type Place } from "./collect";
+import { CHAT_LABEL, editSurface, FOCUS_PATH, isSurfaceData, parseFocus, Serial } from "../surfaces";
+import { collect, docFileOf, docRowKey, rowKey, surfaceRowKey, type Collection, type Found, type Group, type Place } from "./collect";
 
 /** Writes from a document come in bursts (a save, then its orphan report); read once they settle. */
 const REFRESH_DELAY_MS = 150;
@@ -35,6 +35,13 @@ function shortDate(iso: string): string {
   return Number.isNaN(t) ? "" : dateFormat.format(t);
 }
 
+/** What a failed jump says, by what it was opening. */
+const OPEN_COPY = {
+  doc: { gone: "That document is no longer in a room.", failed: "That document could not be opened. Try again." },
+  answer: { gone: "That answer is no longer in its chat.", failed: "That answer could not be opened. Try again." },
+  note: { gone: "That note is no longer in the Journal.", failed: "That note could not be opened. Try again." },
+};
+
 /** The background page queues its own edits; this keeps the tab's from overwriting each other. */
 const noteEdits = new Serial();
 
@@ -46,9 +53,9 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [notice, setNotice] = useState<string | null>(null);
-  /** Answer rows whose notes are open, by row key. */
+  /** Answer and note rows whose notes are open, by row key. */
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  /** The row the range menu over an answer asked to show. */
+  /** The row the range menu over an answer or a note asked to show. */
   const [focus, setFocus] = useState<string | null>(null);
 
   const latest = useRef(0);
@@ -102,7 +109,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
     const f = parseFocus(raw, Date.now());
     if (!f) return;
     rooms.storage.delete(FOCUS_PATH).catch(() => {});
-    const key = answerRowKey(f.path, f.id);
+    const key = surfaceRowKey(f.path, f.id);
     setColor(null);
     setQuery("");
     setExpanded((s) => new Set(s).add(key));
@@ -115,7 +122,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const off = rooms.storage.onChange((path) => {
       if (path === FOCUS_PATH) return void readFocus();
-      if (!path.startsWith("docs/") && !path.startsWith(ANSWERS)) return;
+      if (!path.startsWith("docs/") && !isSurfaceData(path)) return;
       const file = docFileOf(path);
       // A listing in flight or about to start may have read this file before it changed, so it
       // lists again; otherwise only this document's lost text is read.
@@ -152,7 +159,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
   const open = useCallback<Open>(
     async (target) => {
       setNotice(null);
-      const answer = "place" in target && target.place.kind === "answer";
+      const copy = OPEN_COPY["place" in target && target.place.kind === "surface" ? target.place.surface.kind : "doc"];
       try {
         if (!("place" in target)) await rooms.open(target.group);
         else if (target.place.kind === "doc") await rooms.open({ fileKey: target.place.fileKey, anchor: { highlightId: target.id } });
@@ -160,10 +167,10 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
       } catch (e) {
         console.warn("[highlights] could not open", e);
         if (e instanceof PluginError && e.code === "not_found") {
-          setNotice(answer ? "That answer is no longer in its chat." : "That document is no longer in a room.");
+          setNotice(copy.gone);
           void refresh();
         } else {
-          setNotice(answer ? "That answer could not be opened. Try again." : "That document could not be opened. Try again.");
+          setNotice(copy.failed);
         }
       }
     },
@@ -180,7 +187,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
   const editNote = useCallback(
     async (path: string, edit: Edit) => {
       try {
-        await noteEdits.run(path, () => editAnswer(rooms.storage, path, edit, new Date().toISOString()));
+        await noteEdits.run(path, () => editSurface(rooms.storage, path, edit, new Date().toISOString()));
       } catch (e) {
         console.warn("[highlights] could not save the note", e);
         setNotice("That note could not be saved. Try again.");
@@ -388,7 +395,7 @@ interface RowProps {
 const Row = memo(function Row({ found, rowKey, orphan, open, expanded, focused, toggle, editNote }: RowProps) {
   const { h, place } = found;
   const c = COLORS[h.color];
-  const chat = place.kind === "answer" ? CHAT_LABEL[place.surface.scope.kind] : "";
+  const chat = place.kind === "surface" && place.surface.kind === "answer" ? CHAT_LABEL[place.surface.scope.kind] : "";
   const meta = [c.label, chat, shortDate(h.createdAt), h.annotations.length ? plural(h.annotations.length, "note") : ""].filter(Boolean).join(" · ");
   const body = (
     <>
@@ -424,10 +431,10 @@ const Row = memo(function Row({ found, rowKey, orphan, open, expanded, focused, 
       {body}
     </div>
   );
-  if (place.kind !== "answer") return card;
-  // Notes on answer highlights are edited here: the app draws only buttons and menus over answers.
+  if (place.kind !== "surface") return card;
+  // Notes on answer and note highlights are edited here: the app draws only buttons and menus over its own text.
   return (
-    <div className="answer-row">
+    <div className="surface-row">
       {card}
       <button type="button" className="notes-toggle" aria-expanded={expanded} onClick={() => toggle(rowKey)}>
         {expanded ? "Hide notes" : h.annotations.length ? `Edit ${plural(h.annotations.length, "note")}` : "Add a note"}
