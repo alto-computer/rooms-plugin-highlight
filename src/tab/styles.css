@@ -259,7 +259,7 @@ button.hl:hover {
   background: var(--hover);
 }
 
-.answer-row {
+.surface-row {
   display: flex;
   flex-direction: column;
   gap: 4px;

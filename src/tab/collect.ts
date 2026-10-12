@@ -1,16 +1,17 @@
 /*
  * Gathers every highlight for the tab: the files the content script keeps under
  * `docs/<fileKey>/`, joined by fileKey with the documents the user's rooms link, and the files the
- * background page keeps under `answer/`, grouped by the thread they belong to. A document's chat
- * answers join the document's own highlights. Each document can write its own files, so
- * everything read here is untrusted and goes through the model's parsers.
+ * background page keeps under `answer/` and `note/`, answers grouped by the thread they belong to
+ * and notes one group each. A document's chat answers join the document's own highlights. Each
+ * document can write its own files, so everything read here is untrusted and goes through the
+ * model's parsers.
  */
-import type { AnswerScope, RoomsPlugin, SurfaceId } from "@alto-rooms/plugin-sdk";
-import { answerOrphansPath, ANSWERS, surfaceOf } from "../answers";
+import { surfaceKey, type AnswerScope, type RoomsPlugin, type SurfaceId } from "@alto-rooms/plugin-sdk";
+import { orphansPathOf, parseStoredPath, SURFACE_DIRS, surfaceAt } from "../surfaces";
 import { DOC_PATH, ORPHANS_PATH, parseIds, readDocFile, type DocFile, type Highlight } from "../model";
 
-/** Where a highlight lives: in a document's text, or in one chat answer. */
-export type Place = { kind: "doc"; fileKey: string } | { kind: "answer"; surface: SurfaceId; path: string };
+/** Where a highlight lives: in a document's text, or on a host surface (a chat answer or a note) with its file. */
+export type Place = { kind: "doc"; fileKey: string } | { kind: "surface"; surface: SurfaceId; path: string };
 
 export interface Found {
   h: Highlight;
@@ -18,7 +19,7 @@ export interface Found {
 }
 
 export interface Group {
-  /** `doc:<fileKey>`, `room:<roomId>`, `day:<date>` or `conversation:<agent>/<session>`. */
+  /** `doc:<fileKey>`, `room:<roomId>`, `day:<date>`, `session:<agent>/<id>`, or a note's `surfaceKey`. */
   key: string;
   title: string;
   /** A document's rooms, or the kind of thread; says when the document or room is gone. */
@@ -29,7 +30,7 @@ export interface Group {
   removed: boolean;
   /** Newest first. */
   found: Found[];
-  /** Row keys of highlights whose text the document or answer no longer has, as its script last saw. */
+  /** Row keys of highlights whose text the document or surface no longer has, as its script last saw. */
   orphans: ReadonlySet<string>;
 }
 
@@ -43,9 +44,9 @@ export interface Collection {
 export type CollectContext = Pick<RoomsPlugin, "storage" | "rooms" | "artifacts">;
 
 /** A row's key, unique across the tab: the same highlight id can be in a document and an answer. */
-export const rowKey = ({ h, place }: Found): string => (place.kind === "doc" ? docRowKey(place.fileKey, h.id) : answerRowKey(place.path, h.id));
+export const rowKey = ({ h, place }: Found): string => (place.kind === "doc" ? docRowKey(place.fileKey, h.id) : surfaceRowKey(place.path, h.id));
 export const docRowKey = (fileKey: string, id: string): string => `doc:${fileKey}#${id}`;
-export const answerRowKey = (path: string, id: string): string => `${path}#${id}`;
+export const surfaceRowKey = (path: string, id: string): string => `${path}#${id}`;
 
 const FILE = /^docs\/([A-Za-z0-9._-]+)\/([^/]+)$/;
 
@@ -85,21 +86,29 @@ async function linked(ctx: CollectContext): Promise<Linked> {
 
 function scopeKey(scope: AnswerScope): string {
   switch (scope.kind) {
-    case "doc":
+    case "artifact":
       return `doc:${scope.fileKey}`;
     case "room":
       return `room:${scope.roomId}`;
     case "day":
       return `day:${scope.date}`;
-    case "conversation":
-      return `conversation:${scope.agent}/${scope.session}`;
+    case "session":
+      return `session:${scope.agent}/${scope.id}`;
   }
 }
 
-function newGroup(scope: AnswerScope, link: Linked, storedTitle = ""): Group {
-  const base = { key: scopeKey(scope), found: [], orphans: new Set<string>() };
+/** The group a surface's highlights list under: its thread's for an answer, its own for a note. */
+const groupKey = (s: SurfaceId): string => (s.kind === "note" ? surfaceKey(s) : scopeKey(s.scope));
+
+/** A note's name as the Journal shows it, without `.md`. */
+const noteTitle = (name: string): string => name.replace(/\.md$/i, "") || name;
+
+function newGroup(scope: AnswerScope | Extract<SurfaceId, { kind: "note" }>, link: Linked, storedTitle = ""): Group {
+  const base = { key: scope.kind === "note" ? surfaceKey(scope) : scopeKey(scope), found: [], orphans: new Set<string>() };
   switch (scope.kind) {
-    case "doc": {
+    case "note":
+      return { ...base, title: noteTitle(scope.name), where: `Notes · ${dayTitle(scope.date)}`, target: null, removed: false };
+    case "artifact": {
       const doc = link.docs.get(scope.fileKey);
       return { ...base, title: doc?.title || storedTitle || "Untitled", where: doc ? doc.rooms.join(" · ") : "Doc removed", target: { fileKey: scope.fileKey }, removed: !doc };
     }
@@ -109,19 +118,20 @@ function newGroup(scope: AnswerScope, link: Linked, storedTitle = ""): Group {
     }
     case "day":
       return { ...base, title: dayTitle(scope.date), where: "Journal", target: null, removed: false };
-    case "conversation":
+    case "session":
       return { ...base, title: scope.agent, where: "Agent chat", target: null, removed: false };
   }
 }
 
 export async function collect(ctx: CollectContext): Promise<Collection> {
-  const [docPaths, answerPaths, link] = await Promise.all([ctx.storage.list("docs/"), ctx.storage.list(ANSWERS), linked(ctx)]);
-  const listed = new Set([...docPaths, ...answerPaths]);
+  const [docPaths, link, ...surfaceLists] = await Promise.all([ctx.storage.list("docs/"), linked(ctx), ...SURFACE_DIRS.map((d) => ctx.storage.list(d))]);
+  const surfacePaths = surfaceLists.flat();
+  const listed = new Set([...docPaths, ...surfacePaths]);
   const docKeys = docPaths.flatMap((p) => {
     const f = docFileOf(p);
     return f?.name === DOC_PATH ? [f.fileKey] : [];
   });
-  const [docs, answers] = await Promise.all([
+  const [docs, onSurfaces] = await Promise.all([
     Promise.all(
       docKeys.map(async (fileKey) => {
         const orphansPath = `docs/${fileKey}/${ORPHANS_PATH}`;
@@ -130,10 +140,10 @@ export async function collect(ctx: CollectContext): Promise<Collection> {
       }),
     ),
     Promise.all(
-      answerPaths
-        .filter((p) => surfaceOf(p))
+      surfacePaths
+        .filter((p) => parseStoredPath(p))
         .map(async (path) => {
-          const orphansPath = answerOrphansPath(path);
+          const orphansPath = orphansPathOf(path);
           const [raw, orphans] = await Promise.all([ctx.storage.read(path), listed.has(orphansPath) ? ctx.storage.read(orphansPath) : null]);
           return { path, raw, orphans };
         }),
@@ -152,21 +162,25 @@ export async function collect(ctx: CollectContext): Promise<Collection> {
   for (const { fileKey, raw, orphans } of docs) {
     const file = parse(raw);
     if (!file) continue;
-    const group = newGroup({ kind: "doc", fileKey }, link, file.title);
+    const group = newGroup({ kind: "artifact", fileKey }, link, file.title);
     group.orphans = new Set(parseIds(orphans).map((id) => docRowKey(fileKey, id)));
     group.found = file.highlights.map((h) => ({ h, place: { kind: "doc", fileKey } }));
     groups.set(group.key, group);
   }
-  for (const { path, raw, orphans } of answers) {
+  for (const { path, raw, orphans } of onSurfaces) {
     const file = parse(raw);
-    const surface = surfaceOf(path)!;
     if (!file) continue;
-    const key = scopeKey(surface.scope);
-    const group = groups.get(key) ?? newGroup(surface.scope, link);
+    const surface = surfaceAt(path, file.title);
+    if (!surface) {
+      skipped++;
+      continue;
+    }
+    const key = groupKey(surface);
+    const group = groups.get(key) ?? newGroup(surface.kind === "note" ? surface : surface.scope, link);
     groups.set(key, group);
-    const place: Place = { kind: "answer", surface, path };
+    const place: Place = { kind: "surface", surface, path };
     for (const h of file.highlights) group.found.push({ h, place });
-    const lost = parseIds(orphans).map((id) => answerRowKey(path, id));
+    const lost = parseIds(orphans).map((id) => surfaceRowKey(path, id));
     if (lost.length) group.orphans = new Set([...group.orphans, ...lost]);
   }
 

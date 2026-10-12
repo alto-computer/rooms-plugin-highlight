@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PluginArtifact } from "@alto-rooms/plugin-sdk";
+import type { PluginArtifact, SurfaceId } from "@alto-rooms/plugin-sdk";
+import { orphansPathOf, surfaceFile } from "../surfaces";
 import { collect, type CollectContext, type Group } from "./collect";
 
 const ids = (g: Group) => g.found.map((f) => f.h.id);
@@ -86,8 +87,8 @@ describe("collect", () => {
         {
           "docs/k1/highlights.json": file("Report", [h("a", "2026-10-01T00:00:00Z")]),
           "docs/k1/orphans.json": JSON.stringify(["a"]),
-          "answer/doc/k1/t1.json": file("Q", [h("a", "2026-10-04T00:00:00Z"), h("b", "2026-10-03T00:00:00Z")]),
-          "answer/doc/k1/t1.orphans": JSON.stringify(["b"]),
+          "answer/artifact/k1/t1.json": file("Q", [h("a", "2026-10-04T00:00:00Z"), h("b", "2026-10-03T00:00:00Z")]),
+          "answer/artifact/k1/t1.orphans": JSON.stringify(["b"]),
           "answer/room/r1/t2.json": file("Q", [h("c", "2026-10-02T00:00:00Z")]),
         },
         [{ id: "r1", name: "Bench", artifacts: [art("r1", "k1", "Report")] }],
@@ -95,7 +96,7 @@ describe("collect", () => {
     );
     expect(c.skipped).toBe(0);
     expect(c.groups.map((g) => [g.key, [...g.orphans].sort()])).toEqual([
-      ["doc:k1", ["answer/doc/k1/t1.json#b", "doc:k1#a"]],
+      ["doc:k1", ["answer/artifact/k1/t1.json#b", "doc:k1#a"]],
       ["room:r1", []],
     ]);
   });
@@ -105,7 +106,7 @@ describe("collect", () => {
       ctx(
         {
           "docs/k1/highlights.json": file("Report", [h("d1", "2026-10-01T00:00:00Z")]),
-          "answer/doc/k1/t1.json": file("The cache misses at night", [h("a1", "2026-10-04T00:00:00Z")]),
+          "answer/artifact/k1/t1.json": file("The cache misses at night", [h("a1", "2026-10-04T00:00:00Z")]),
           "answer/room/r1/t2.json": file("Three docs disagree", [h("a2", "2026-10-03T00:00:00Z")]),
           "answer/room/r1/t3.json": file("Later", [h("a3", "2026-10-05T00:00:00Z")]),
           "answer/day/2026-10-11/t4.json": file("Yesterday", [h("a4", "2026-10-02T00:00:00Z")]),
@@ -127,8 +128,34 @@ describe("collect", () => {
     expect(c.groups[2].title).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(2026, 9, 11)));
     const doc = c.groups[1].found;
     expect(doc.map((f) => f.place)).toEqual([
-      { kind: "answer", surface: { kind: "answer", scope: { kind: "doc", fileKey: "k1" }, turnId: "t1" }, path: "answer/doc/k1/t1.json" },
+      { kind: "surface", surface: { kind: "answer", scope: { kind: "artifact", fileKey: "k1" }, turnId: "t1" }, path: "answer/artifact/k1/t1.json" },
       { kind: "doc", fileKey: "k1" },
     ]);
+  });
+
+  it("lists each note's highlights as its own group under its name, marked Notes with the day, and opens them by the name in the file", async () => {
+    const plan: SurfaceId = { kind: "note", date: "2026-10-11", name: "Plan.md" };
+    const memo: SurfaceId = { kind: "note", date: "2026-10-04", name: "회의 메모.md" };
+    const c = await collect(
+      ctx(
+        {
+          [surfaceFile(plan)]: file("Plan.md", [h("n1", "2026-10-11T00:00:00Z"), h("n2", "2026-10-11T01:00:00Z")]),
+          [orphansPathOf(surfaceFile(plan))]: JSON.stringify(["n1"]),
+          [surfaceFile(memo)]: file("회의 메모.md", [h("n3", "2026-10-05T00:00:00Z")]),
+          [surfaceFile({ kind: "note", date: "2026-10-04", name: "Forged.md" })]: file("Other.md", [h("n4", "2026-10-06T00:00:00Z")]),
+          "answer/room/r1/t1.json": file("Q", [h("a1", "2026-10-08T00:00:00Z")]),
+        },
+        [{ id: "r1", name: "Bench", artifacts: [] }],
+      ),
+    );
+    const day = (y: number, m: number, d: number) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(y, m, d));
+    expect(c.skipped, "a note file whose title is not its name").toBe(1);
+    expect(c.groups.map((g) => [g.title, g.where, g.target, g.removed, ids(g)])).toEqual([
+      ["Plan", `Notes · ${day(2026, 9, 11)}`, null, false, ["n2", "n1"]],
+      ["Bench", "Room chat", { roomId: "r1" }, false, ["a1"]],
+      ["회의 메모", `Notes · ${day(2026, 9, 4)}`, null, false, ["n3"]],
+    ]);
+    expect(c.groups[0].found[0].place).toEqual({ kind: "surface", surface: plan, path: surfaceFile(plan) });
+    expect([...c.groups[0].orphans]).toEqual([`${surfaceFile(plan)}#n1`]);
   });
 });

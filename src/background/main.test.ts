@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ContentAction, SurfaceId, SurfaceRange, SurfaceStyles } from "@alto-rooms/plugin-sdk";
+import { surfacePath, type ContentAction, type SurfaceId, type SurfaceRange, type SurfaceStyles } from "@alto-rooms/plugin-sdk";
 
 type Cb = (...a: never[]) => void;
 /** The app side of connect() and connectSurfaces(): storage in a Map, and what the page posted. */
 const app = vi.hoisted(() => ({
   files: new Map<string, string>(),
   actions: [] as ContentAction[],
-  paints: [] as { surface: SurfaceId; ranges: SurfaceRange[]; styles?: SurfaceStyles }[],
+  paints: [] as { surface: SurfaceId; ranges: SurfaceRange[]; styles?: SurfaceStyles; version?: number }[],
   menus: [] as { surface: SurfaceId; rangeId: string; items: ContentAction[] }[],
   on: {} as Record<string, Cb>,
   changed: null as ((path: string) => void) | null,
@@ -20,7 +20,7 @@ vi.mock("@alto-rooms/plugin-sdk", async (actual) => ({
       read: async (p: string) => app.files.get(p) ?? null,
       write: async (p: string, t: string) => void app.files.set(p, t),
       delete: async (p: string) => void app.files.delete(p),
-      list: async () => [...app.files.keys()],
+      list: async (prefix = "") => [...app.files.keys()].filter((p) => p.startsWith(prefix)),
       onChange: (cb: (p: string) => void) => ((app.changed = cb), () => {}),
     },
   }),
@@ -28,7 +28,7 @@ vi.mock("@alto-rooms/plugin-sdk", async (actual) => ({
     const on = (name: string) => (cb: Cb) => ((app.on[name] = cb), () => {});
     return {
       setActions: (items: ContentAction[]) => (app.actions = items),
-      paint: (surface: SurfaceId, ranges: SurfaceRange[], styles?: SurfaceStyles) => app.paints.push({ surface, ranges, styles }),
+      paint: (surface: SurfaceId, ranges: SurfaceRange[], styles?: SurfaceStyles, version?: number) => app.paints.push({ surface, ranges, styles, version }),
       menu: (surface: SurfaceId, rangeId: string, items: ContentAction[]) => app.menus.push({ surface, rangeId, items }),
       onOpen: on("open"),
       onClose: on("close"),
@@ -47,6 +47,7 @@ const ANSWER = "The cache misses at night because the batch job evicts it. Warm 
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 const fire = async (name: string, ...args: unknown[]) => {
+  await settle();
   (app.on[name] as (...a: unknown[]) => void)(...args);
   await settle();
   await settle();
@@ -199,5 +200,80 @@ describe("the background page", () => {
     await fire("open", ROOM, ANSWER);
     await fire("action", "agree", { surface: ROOM, ...at("cache"), text: "cache" });
     expect(app.files.get(ROOM_FILE)).toBe("not json");
+  });
+});
+
+describe("answers saved before 0.4.0", () => {
+  it("moves an artifact chat's answer file to its new path before reading it, and paints its highlights", async () => {
+    const ART: SurfaceId = { kind: "answer", scope: { kind: "artifact", fileKey: "k1" }, turnId: "t1" };
+    const h = { id: "h1", color: "idk", text: "Warm it", prefix: "evicts it. ", suffix: " after the job.", start: 70, annotations: [], createdAt: "2026-10-11T00:00:00Z" };
+    const old = JSON.stringify({ version: 1, title: "q", highlights: [h] });
+    await boot({ "answer/doc/k1/t1.json": old });
+    await fire("open", ART, ANSWER, 4);
+    expect([...app.files.keys()]).toEqual(["answer/artifact/k1/t1.json"]);
+    expect(app.files.get("answer/artifact/k1/t1.json")).toBe(old);
+    expect(lastPaint()).toEqual(expect.objectContaining({ surface: ART, ranges: [{ id: "h1", ...at("Warm it"), style: "idk" }], version: 4 }));
+  });
+});
+
+describe("note highlights", () => {
+  const NOTE: SurfaceId = { kind: "note", date: "2026-10-11", name: "Plan.md" };
+  const FILE = `${surfacePath(NOTE)}.json`;
+  const BODY = "Ship the cache fix on Friday.\nThen warm it after the batch job.";
+  const where = (text: string, s: string) => ({ start: text.indexOf(s), end: text.indexOf(s) + s.length });
+
+  beforeEach(() => boot());
+
+  async function highlighted(word = "warm it") {
+    await fire("open", NOTE, BODY, 1);
+    await fire("action", "agree", { surface: NOTE, ...where(BODY, word), text: word });
+    return stored(FILE).highlights[0].id as string;
+  }
+
+  it("stores a note's highlight under the SDK's path for the note, titled with its name, and paints it on the text it was given", async () => {
+    const id = await highlighted();
+    expect(FILE).toMatch(/^note\/2026-10-11\/plan\.md-[0-9a-f]{8}\.json$/);
+    expect(stored(FILE).title).toBe("Plan.md");
+    expect(lastPaint()).toEqual(expect.objectContaining({ surface: NOTE, ranges: [{ id, ...where(BODY, "warm it"), style: "agree" }], version: 1 }));
+  });
+
+  it("keeps the paint on its words when the user types above it, naming the newer text", async () => {
+    const id = await highlighted();
+    const typed = `A new first line.\n${BODY}`;
+    await fire("open", NOTE, typed, 7);
+    expect(lastPaint()).toEqual(expect.objectContaining({ ranges: [{ id, ...where(typed, "warm it"), style: "agree" }], version: 7 }));
+    expect(app.files.has(FILE.replace(/\.json$/, ".orphans"))).toBe(false);
+  });
+
+  it("keeps a highlight whose words were deleted as lost, paints nothing for it, and paints it again once the words are back", async () => {
+    const id = await highlighted();
+    const cut = "Ship the cache fix on Friday.\nThen leave it.";
+    await fire("open", NOTE, cut, 2);
+    expect(lastPaint().ranges).toEqual([]);
+    expect(stored(FILE).highlights.map((h: { id: string }) => h.id)).toEqual([id]);
+    expect(JSON.parse(app.files.get(FILE.replace(/\.json$/, ".orphans"))!)).toEqual([id]);
+
+    await fire("open", NOTE, BODY, 3);
+    expect(lastPaint().ranges).toEqual([{ id, ...where(BODY, "warm it"), style: "agree" }]);
+  });
+
+  it("takes a note's highlights along when it is renamed, and paints them under the new name", async () => {
+    const id = await highlighted();
+    const renamed: SurfaceId = { kind: "note", date: "2026-10-11", name: "Launch plan.md" };
+    const to = `${surfacePath(renamed)}.json`;
+    await fire("close", NOTE);
+    await fire("open", renamed, BODY, 2);
+    expect([...app.files.keys()]).toEqual([to]);
+    expect(stored(to)).toEqual(expect.objectContaining({ title: "Launch plan.md", highlights: [expect.objectContaining({ id, text: "warm it" })] }));
+    expect(lastPaint()).toEqual(expect.objectContaining({ surface: renamed, ranges: [{ id, ...where(BODY, "warm it"), style: "agree" }], version: 2 }));
+  });
+
+  it("does not take a closed note's highlights into a different note opened after it", async () => {
+    await highlighted();
+    await fire("close", NOTE);
+    const other: SurfaceId = { kind: "note", date: "2026-10-11", name: "Groceries.md" };
+    await fire("open", other, "Eggs, milk.", 2);
+    expect([...app.files.keys()]).toEqual([FILE]);
+    expect(lastPaint()).toEqual(expect.objectContaining({ surface: other, ranges: [] }));
   });
 });
