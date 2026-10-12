@@ -170,6 +170,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
     [rooms, refresh],
   );
   const toggle = useCallback((key: string) => {
+    setFocus(null);
     setExpanded((s) => {
       const next = new Set(s);
       if (!next.delete(key)) next.add(key);
@@ -301,9 +302,14 @@ function GroupList({ groups, open, scroller, expanded, toggle, editNote, focus }
     overscan: 10,
   });
   const focusAt = focus ? items.findIndex((it) => it.kind === "row" && it.key === focus) : -1;
+  /** Scrolls to a focused row once, so a later listing does not pull the list back to it. */
+  const scrolledTo = useRef<string | null>(null);
   useEffect(() => {
-    if (focusAt >= 0) virtual.scrollToIndex(focusAt, { align: "center" });
-  }, [focusAt, virtual]);
+    if (!focus) scrolledTo.current = null;
+    if (focusAt < 0 || scrolledTo.current === focus) return;
+    scrolledTo.current = focus;
+    virtual.scrollToIndex(focusAt, { align: "center" });
+  }, [focus, focusAt, virtual]);
 
   const lines = virtual.getVirtualItems();
   const sections: { group: Group; lines: typeof lines }[] = [];
