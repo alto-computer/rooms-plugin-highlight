@@ -5,8 +5,7 @@
     "": {
       "name": "rooms-plugin-highlight",
       "dependencies": {
-        "@alto-rooms/plugin-sdk": "/private/tmp/claude-501/sdk070-hl/alto-rooms-plugin-sdk-0.7.0.tgz",
-        "@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.6.0/alto-rooms-plugin-sdk-0.6.0.tgz",
+        "@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.7.0/alto-rooms-plugin-sdk-0.7.0.tgz",
         "@tanstack/react-virtual": "3.14.13",
         "react": "^19.3.0",
         "react-dom": "^19.3.0",
@@ -26,7 +25,7 @@
     },
   },
   "packages": {
-    "@alto-rooms/plugin-sdk": ["@alto-rooms/plugin-sdk@/private/tmp/claude-501/sdk070-hl/alto-rooms-plugin-sdk-0.7.0.tgz", {}, "sha512-oMSa/2VUffP0HfYhA+6fU+1I8RoJBOmFXurdNNDjiraNdjgxa7TMitgSIjgY89ttSlHcZWPZuR4Ka8xHSSRXkw=="],
+    "@alto-rooms/plugin-sdk": ["@alto-rooms/plugin-sdk@https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.7.0/alto-rooms-plugin-sdk-0.7.0.tgz", {}, "sha512-lt2I1n4KCu9y7zoTKmEvAk/N5S+tr0KjHDyUjSWQdLx9hmBITXivcnbnLylAczZ5j2mrHX9lOBobgBzZIzNwDQ=="],
 
     "@asamuzakjp/css-color": ["@asamuzakjp/css-color@7.1.4", "", { "dependencies": { "@csstools/css-calc": "^3.4.3", "@csstools/css-color-parser": "^4.2.6", "@csstools/css-parser-algorithms": "^4.0.2", "@csstools/css-tokenizer": "^4.0.2", "lru-cache": "^11.5.3" } }, "sha512-KdNhWlAh2sbYB8Of0Yw84/a+LO/vsBOHJcIg8BpyXo2RGrFWVJvEMRviMON+ysQu0KpV7wxrWrq9jaX0P21GzA=="],
 
