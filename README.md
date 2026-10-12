@@ -56,10 +56,10 @@ HIGHLIGHT_DIST=<this repo>/dist bunx playwright test e2e/lanes/ --project chromi
 
 ### The SDK
 
-`onReveal` and the `anchor` of `open` arrive in `@alto-rooms/plugin-sdk` 0.4.0, which is not released yet. Until it is, `vendor/plugin-sdk/` holds a copy of `packages/plugin-sdk` (its `package.json` and the files it lists) from alto-rooms `973f279`, and `package.json` depends on it. Once the `plugin-sdk-v0.4.0` release exists, replace the dependency line with the line below, delete `vendor/`, and run `bun install`:
+The background page uses `connectSurfaces` from `@alto-rooms/plugin-sdk` 0.5.0, which is not released yet. Until it is, `vendor/plugin-sdk/` holds a copy of `packages/plugin-sdk` (its `package.json` and the files it lists) from alto-rooms `439aa0f`, and `package.json` depends on it. Once the `plugin-sdk-v0.5.0` release exists, replace the dependency line with the line below, delete `vendor/`, and run `bun install`:
 
 ```json
-"@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.4.0/alto-rooms-plugin-sdk-0.4.0.tgz"
+"@alto-rooms/plugin-sdk": "https://github.com/alto-computer/alto-rooms/releases/download/plugin-sdk-v0.5.0/alto-rooms-plugin-sdk-0.5.0.tgz"
 ```
 
 ## License
