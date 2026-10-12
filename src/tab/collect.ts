@@ -97,14 +97,16 @@ function scopeKey(scope: AnswerScope): string {
   }
 }
 
-/** The group a surface's highlights list under: its thread's for an answer, its own for a note. */
-const groupKey = (s: SurfaceId): string => (s.kind === "note" ? surfaceKey(s) : scopeKey(s.scope));
+/** What a surface's highlights list under: an answer's thread, or the note itself. */
+type Owner = AnswerScope | Extract<SurfaceId, { kind: "note" }>;
+const ownerOf = (s: SurfaceId): Owner => (s.kind === "note" ? s : s.scope);
+const ownerKey = (o: Owner): string => (o.kind === "note" ? surfaceKey(o) : scopeKey(o));
 
 /** A note's name as the Journal shows it, without `.md`. */
 const noteTitle = (name: string): string => name.replace(/\.md$/i, "") || name;
 
-function newGroup(scope: AnswerScope | Extract<SurfaceId, { kind: "note" }>, link: Linked, storedTitle = ""): Group {
-  const base = { key: scope.kind === "note" ? surfaceKey(scope) : scopeKey(scope), found: [], orphans: new Set<string>() };
+function newGroup(scope: Owner, link: Linked, storedTitle = ""): Group {
+  const base = { key: ownerKey(scope), found: [], orphans: new Set<string>() };
   switch (scope.kind) {
     case "note":
       return { ...base, title: noteTitle(scope.name), where: `Notes · ${dayTitle(scope.date)}`, target: null, removed: false };
@@ -175,8 +177,9 @@ export async function collect(ctx: CollectContext): Promise<Collection> {
       skipped++;
       continue;
     }
-    const key = groupKey(surface);
-    const group = groups.get(key) ?? newGroup(surface.kind === "note" ? surface : surface.scope, link);
+    const owner = ownerOf(surface);
+    const key = ownerKey(owner);
+    const group = groups.get(key) ?? newGroup(owner, link);
     groups.set(key, group);
     const place: Place = { kind: "surface", surface, path };
     for (const h of file.highlights) group.found.push({ h, place });
