@@ -6,7 +6,7 @@
  * everything read here is untrusted and goes through the model's parsers.
  */
 import type { AnswerScope, RoomsPlugin, SurfaceId } from "@alto-rooms/plugin-sdk";
-import { ANSWERS, surfaceOf } from "../answers";
+import { answerOrphansPath, ANSWERS, surfaceOf } from "../answers";
 import { DOC_PATH, ORPHANS_PATH, parseIds, readDocFile, type DocFile, type Highlight } from "../model";
 
 /** Where a highlight lives: in a document's text, or in one chat answer. */
@@ -29,7 +29,7 @@ export interface Group {
   removed: boolean;
   /** Newest first. */
   found: Found[];
-  /** Ids of document highlights whose text the document no longer has, as the content script last saw. */
+  /** Row keys of highlights whose text the document or answer no longer has, as its script last saw. */
   orphans: ReadonlySet<string>;
 }
 
@@ -41,6 +41,11 @@ export interface Collection {
 }
 
 export type CollectContext = Pick<RoomsPlugin, "storage" | "rooms" | "artifacts">;
+
+/** A row's key, unique across the tab: the same highlight id can be in a document and an answer. */
+export const rowKey = ({ h, place }: Found): string => (place.kind === "doc" ? docRowKey(place.fileKey, h.id) : answerRowKey(place.path, h.id));
+export const docRowKey = (fileKey: string, id: string): string => `doc:${fileKey}#${id}`;
+export const answerRowKey = (path: string, id: string): string => `${path}#${id}`;
 
 const FILE = /^docs\/([A-Za-z0-9._-]+)\/([^/]+)$/;
 
@@ -111,7 +116,7 @@ function newGroup(scope: AnswerScope, link: Linked, storedTitle = ""): Group {
 
 export async function collect(ctx: CollectContext): Promise<Collection> {
   const [docPaths, answerPaths, link] = await Promise.all([ctx.storage.list("docs/"), ctx.storage.list(ANSWERS), linked(ctx)]);
-  const listed = new Set(docPaths);
+  const listed = new Set([...docPaths, ...answerPaths]);
   const docKeys = docPaths.flatMap((p) => {
     const f = docFileOf(p);
     return f?.name === DOC_PATH ? [f.fileKey] : [];
@@ -124,7 +129,15 @@ export async function collect(ctx: CollectContext): Promise<Collection> {
         return { fileKey, raw, orphans };
       }),
     ),
-    Promise.all(answerPaths.filter((p) => surfaceOf(p)).map(async (path) => ({ path, raw: await ctx.storage.read(path) }))),
+    Promise.all(
+      answerPaths
+        .filter((p) => surfaceOf(p))
+        .map(async (path) => {
+          const orphansPath = answerOrphansPath(path);
+          const [raw, orphans] = await Promise.all([ctx.storage.read(path), listed.has(orphansPath) ? ctx.storage.read(orphansPath) : null]);
+          return { path, raw, orphans };
+        }),
+    ),
   ]);
 
   let skipped = 0;
@@ -140,18 +153,21 @@ export async function collect(ctx: CollectContext): Promise<Collection> {
     const file = parse(raw);
     if (!file) continue;
     const group = newGroup({ kind: "doc", fileKey }, link, file.title);
-    group.orphans = new Set(parseIds(orphans));
+    group.orphans = new Set(parseIds(orphans).map((id) => docRowKey(fileKey, id)));
     group.found = file.highlights.map((h) => ({ h, place: { kind: "doc", fileKey } }));
     groups.set(group.key, group);
   }
-  for (const { path, raw } of answers) {
+  for (const { path, raw, orphans } of answers) {
     const file = parse(raw);
     const surface = surfaceOf(path)!;
     if (!file) continue;
     const key = scopeKey(surface.scope);
     const group = groups.get(key) ?? newGroup(surface.scope, link);
     groups.set(key, group);
-    for (const h of file.highlights) group.found.push({ h, place: { kind: "answer", surface, path } });
+    const place: Place = { kind: "answer", surface, path };
+    for (const h of file.highlights) group.found.push({ h, place });
+    const lost = parseIds(orphans).map((id) => answerRowKey(path, id));
+    if (lost.length) group.orphans = new Set([...group.orphans, ...lost]);
   }
 
   const sorted = [...groups.values()];

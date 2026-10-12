@@ -45,7 +45,7 @@ Each chat answer's highlights are one file of the same shape, named by the answe
 ~/rooms/.rooms/plugins/highlight/data/answer/conversation/<agent>/<session>/<turnId>.json
 ```
 
-Its `title` is the start of the answer, since the background page sees answers and never their questions. `start`, `prefix` and `suffix` index the answer's text, and each open finds the highlight again the same way as in a document. The file goes away with its last highlight. `focus.json` is the range menu's request to show one highlight's notes; the tab reads and deletes it.
+Its `title` is the start of the answer, since the background page sees answers and never their questions. `start`, `prefix` and `suffix` index the answer's text, and each open finds the highlight again the same way as in a document. The file goes away with its last highlight. Beside it, `<turnId>.orphans` lists the ids of the highlights whose text the answer no longer has, as the background page last saw it, for example after the answer was regenerated; the tab marks those rows like a document's lost text. `focus.json` is the range menu's request to show one highlight's notes; the tab reads and deletes it.
 
 ## Develop
 

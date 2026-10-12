@@ -11,6 +11,12 @@ const TITLE_MAX = 80;
 
 export const answerPath = (s: SurfaceId): string => `${surfacePath(s)}.json`;
 
+/**
+ * The ids of an answer's highlights whose text the answer no longer has, as the background page
+ * last saw, beside the answer's file. No `.json`, so it never reads as an answer's own path.
+ */
+export const answerOrphansPath = (answer: string): string => answer.replace(/\.json$/, ".orphans");
+
 const SCOPED = /^answer\/(doc|room|day)\/([^/]+)\/([^/]+)\.json$/;
 const CONVERSATION = /^answer\/conversation\/([^/]+)\/([^/]+)\/([^/]+)\.json$/;
 
@@ -52,6 +58,32 @@ export async function editAnswer(storage: RoomsPlugin["storage"], path: string, 
   if (next.highlights.length) await storage.write(path, serialize(next));
   else if (raw !== null) await storage.delete(path);
   return next;
+}
+
+/**
+ * Runs each key's tasks one after another, so no edit reads a file another is about to write, and
+ * forgets a key once its last task settles. A task's failure reaches its caller, not the next task.
+ */
+export class Serial {
+  private readonly tails = new Map<string, Promise<void>>();
+
+  get size(): number {
+    return this.tails.size;
+  }
+
+  run<T>(key: string, task: () => Promise<T>): Promise<T> {
+    const result = (this.tails.get(key) ?? Promise.resolve()).then(task);
+    const tail: Promise<void> = result.then(
+      () => this.forget(key, tail),
+      () => this.forget(key, tail),
+    );
+    this.tails.set(key, tail);
+    return result;
+  }
+
+  private forget(key: string, tail: Promise<void>): void {
+    if (this.tails.get(key) === tail) this.tails.delete(key);
+  }
 }
 
 /** Asks the tab to show one answer highlight's notes; written by the range menu, read once by the tab. */

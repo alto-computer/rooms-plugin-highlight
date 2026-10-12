@@ -77,7 +77,27 @@ describe("collect", () => {
       ),
     );
     expect(c.groups.map((g) => g.key)).toEqual(["doc:k2"]);
-    expect([...c.groups[0].orphans]).toEqual(["<b>x</b>", "a"]);
+    expect([...c.groups[0].orphans]).toEqual(["doc:k2#<b>x</b>", "doc:k2#a"]);
+  });
+
+  it("reads which answer highlights lost their text, beside the answer's file, and never lists that file as an answer", async () => {
+    const c = await collect(
+      ctx(
+        {
+          "docs/k1/highlights.json": file("Report", [h("a", "2026-10-01T00:00:00Z")]),
+          "docs/k1/orphans.json": JSON.stringify(["a"]),
+          "answer/doc/k1/t1.json": file("Q", [h("a", "2026-10-04T00:00:00Z"), h("b", "2026-10-03T00:00:00Z")]),
+          "answer/doc/k1/t1.orphans": JSON.stringify(["b"]),
+          "answer/room/r1/t2.json": file("Q", [h("c", "2026-10-02T00:00:00Z")]),
+        },
+        [{ id: "r1", name: "Bench", artifacts: [art("r1", "k1", "Report")] }],
+      ),
+    );
+    expect(c.skipped).toBe(0);
+    expect(c.groups.map((g) => [g.key, [...g.orphans].sort()])).toEqual([
+      ["doc:k1", ["answer/doc/k1/t1.json#b", "doc:k1#a"]],
+      ["room:r1", []],
+    ]);
   });
 
   it("lists answer highlights under their thread: a doc chat with its document, a room chat under the room, a day chat under the day", async () => {

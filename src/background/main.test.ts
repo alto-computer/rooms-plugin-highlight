@@ -99,6 +99,40 @@ describe("the background page", () => {
     expect(lastPaint().ranges).toEqual([{ id: "h1", start: text.indexOf("Warm it"), end: text.indexOf("Warm it") + 7, style: "agree" }]);
   });
 
+  it("finds a painted highlight again when the open answer's text changes", async () => {
+    await fire("open", ROOM, ANSWER);
+    await fire("action", "agree", { surface: ROOM, ...at("Warm it"), text: "Warm it" });
+    const id = stored().highlights[0].id;
+    const text = `Updated. ${ANSWER}`;
+    await fire("open", ROOM, text);
+    expect(lastPaint().ranges).toEqual([{ id, start: text.indexOf("Warm it"), end: text.indexOf("Warm it") + 7, style: "agree" }]);
+  });
+
+  it("tells the tab which highlights the answer lost, and clears it once they are back", async () => {
+    await fire("open", ROOM, ANSWER);
+    await fire("action", "agree", { surface: ROOM, ...at("Warm it"), text: "Warm it" });
+    const id = stored().highlights[0].id;
+    await fire("open", ROOM, "A regenerated answer about something else entirely.");
+    expect(lastPaint().ranges).toEqual([]);
+    expect(JSON.parse(app.files.get("answer/room/r1/t1.orphans")!)).toEqual([id]);
+
+    await fire("open", ROOM, ANSWER);
+    expect(lastPaint().ranges).toHaveLength(1);
+    expect(app.files.has("answer/room/r1/t1.orphans")).toBe(false);
+  });
+
+  it("reports a stored highlight lost on first open, and writes nothing when nothing is lost", async () => {
+    const h = { id: "h1", color: "agree", text: "gone words", prefix: "", suffix: "", start: 3, annotations: [], createdAt: "2026-10-11T00:00:00Z" };
+    await boot({ "answer/day/2026-10-11/t9.json": JSON.stringify({ version: 1, title: "x", highlights: [h] }) });
+    await fire("open", DAY, ANSWER);
+    expect(JSON.parse(app.files.get("answer/day/2026-10-11/t9.orphans")!)).toEqual(["h1"]);
+
+    await boot();
+    await fire("open", ROOM, ANSWER);
+    await fire("action", "agree", { surface: ROOM, ...at("cache"), text: "cache" });
+    expect([...app.files.keys()]).toEqual([ROOM_FILE]);
+  });
+
   it("ignores a whitespace selection, an unknown action and a closed answer", async () => {
     await fire("open", ROOM, ANSWER);
     await fire("action", "agree", { surface: ROOM, start: 9, end: 10, text: " " });

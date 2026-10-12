@@ -258,6 +258,25 @@ describe("HighlightList", () => {
       expect(stored()).toEqual(["first, edited"]);
     });
 
+    it("keeps a note edit and a delete of another note made in one gesture", async () => {
+      const files = withAnswer(["first", "second"]);
+      await mountAnswer(files);
+      const stored = () => JSON.parse(files[PATH]).highlights[0].annotations.map((a: { body: string }) => a.body);
+      fireEvent.click(screen.getByRole("button", { name: "Edit 2 notes" }));
+      const [note] = await screen.findAllByRole("textbox", { name: "Note" });
+      fireEvent.change(note, { target: { value: "first, edited" } });
+      await act(async () => {
+        fireEvent.blur(note);
+        fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+      });
+      expect(stored()).toEqual(["first, edited"]);
+    });
+
+    it("says which answer highlights lost their text", async () => {
+      await mountAnswer({ ...withAnswer(), "answer/room/r1/t1.orphans": JSON.stringify(["x"]) });
+      expect(screen.getByText("warm it after the job").closest(".hl")!.textContent).toContain("Text not found");
+    });
+
     it("opens a highlight's notes when the menu over the answer asks, once", async () => {
       const files = { ...withAnswer(), "focus.json": JSON.stringify({ path: PATH, id: "x", at: Date.now() }) };
       const f = await mountAnswer(files);

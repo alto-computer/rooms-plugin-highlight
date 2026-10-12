@@ -1,9 +1,9 @@
 import { PluginError, type RoomsPlugin } from "@alto-rooms/plugin-sdk";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { ANSWERS, CHAT_LABEL, editAnswer, FOCUS_PATH, parseFocus } from "../answers";
+import { ANSWERS, CHAT_LABEL, editAnswer, FOCUS_PATH, parseFocus, Serial } from "../answers";
 import { COLORS, newId, newNote, ORDER, ORPHANS_PATH, parseIds, type Color, type Edit, type Highlight } from "../model";
-import { collect, docFileOf, type Collection, type Found, type Group, type Place } from "./collect";
+import { answerRowKey, collect, docFileOf, docRowKey, rowKey, type Collection, type Found, type Group, type Place } from "./collect";
 
 /** Writes from a document come in bursts (a save, then its orphan report); read once they settle. */
 const REFRESH_DELAY_MS = 150;
@@ -29,14 +29,14 @@ export function filterGroups(groups: readonly Group[], filter: Filter): Group[] 
   });
 }
 
-/** A row's key, unique across the tab: the same highlight id can be in a document and an answer. */
-const rowKey = ({ h, place }: Found) => (place.kind === "doc" ? `doc:${place.fileKey}#${h.id}` : `${place.path}#${h.id}`);
-
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 function shortDate(iso: string): string {
   const t = Date.parse(iso);
   return Number.isNaN(t) ? "" : dateFormat.format(t);
 }
+
+/** The background page queues its own edits; this keeps the tab's from overwriting each other. */
+const noteEdits = new Serial();
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
@@ -83,7 +83,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
         return;
       }
       if (run !== latest.current || orphanReads.current.get(fileKey) !== read) return;
-      const orphans = new Set(parseIds(raw));
+      const orphans = new Set(parseIds(raw).map((id) => docRowKey(fileKey, id)));
       const key = `doc:${fileKey}`;
       setLoad((l) =>
         l.kind === "ready" ? { ...l, collection: { ...l.collection, groups: l.collection.groups.map((g) => (g.key === key ? { ...g, orphans } : g)) } } : l,
@@ -102,7 +102,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
     const f = parseFocus(raw, Date.now());
     if (!f) return;
     rooms.storage.delete(FOCUS_PATH).catch(() => {});
-    const key = `${f.path}#${f.id}`;
+    const key = answerRowKey(f.path, f.id);
     setColor(null);
     setQuery("");
     setExpanded((s) => new Set(s).add(key));
@@ -180,7 +180,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
   const editNote = useCallback(
     async (path: string, edit: Edit) => {
       try {
-        await editAnswer(rooms.storage, path, edit, new Date().toISOString());
+        await noteEdits.run(path, () => editAnswer(rooms.storage, path, edit, new Date().toISOString()));
       } catch (e) {
         console.warn("[highlights] could not save the note", e);
         setNotice("That note could not be saved. Try again.");
@@ -336,7 +336,7 @@ function GroupList({ groups, open, scroller, expanded, toggle, editNote, focus }
                         <Row
                           found={found}
                           rowKey={key}
-                          orphan={found.place.kind === "doc" && group.orphans.has(found.h.id)}
+                          orphan={group.orphans.has(key)}
                           open={group.removed ? undefined : open}
                           expanded={expanded.has(key)}
                           focused={focus === key}

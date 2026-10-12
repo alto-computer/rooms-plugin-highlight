@@ -4,9 +4,9 @@
  * click on one with a menu to recolor it, delete it, or find its notes in the Highlights tab.
  */
 import { connect, connectSurfaces, type SurfaceId, type SurfaceRange } from "@alto-rooms/plugin-sdk";
-import { answerPath, answerTitle, editAnswer, FOCUS_PATH, PAINT_STYLES, type Focus } from "../answers";
+import { answerOrphansPath, answerPath, answerTitle, editAnswer, FOCUS_PATH, PAINT_STYLES, Serial, type Focus } from "../answers";
 import { locate } from "../content/anchor";
-import { COLORS, CONTEXT, emptyDoc, isColor, newHighlight, newId, ORDER, readDocFile, TEXT_MAX, type DocFile, type Edit } from "../model";
+import { COLORS, CONTEXT, emptyDoc, isColor, newHighlight, newId, ORDER, parseIds, readDocFile, TEXT_MAX, type DocFile, type Edit } from "../model";
 
 const DELETE = "delete";
 const NOTES = "notes";
@@ -15,39 +15,48 @@ interface Open {
   surface: SurfaceId;
   text: string;
   file: DocFile;
+  /** The stored orphan ids as JSON, as last read or written; null until read, and nothing is written before. */
+  orphans: string | null;
 }
 
 const rooms = await connect();
 const surfaces = connectSurfaces();
 /** Every answer on screen, by its file's path. */
 const open = new Map<string, Open>();
-/** Each answer's edits run one after another, so none reads a file another is about to write. */
-const queues = new Map<string, Promise<unknown>>();
+const queues = new Serial();
 
 const now = () => new Date().toISOString();
 
-function paint(entry: Open): void {
-  const ranges: SurfaceRange[] = entry.file.highlights.flatMap((h) => {
-    const at = locate(entry.text, h);
-    return at.status === "orphan" ? [] : [{ id: h.id, start: at.start, end: at.end, style: h.color }];
-  });
-  surfaces.paint(entry.surface, ranges, PAINT_STYLES);
+function queued(path: string, run: () => Promise<void>): Promise<void> {
+  return queues.run(path, run).catch((e) => console.warn("[highlights] could not save", e));
 }
 
-function queued(path: string, run: () => Promise<void>): Promise<void> {
-  const next = (queues.get(path) ?? Promise.resolve()).then(run).catch((e) => console.warn("[highlights] could not save", e));
-  queues.set(path, next);
-  return next;
+/** Paints the answer, and tells the tab which highlights' text the answer no longer has. */
+function paint(path: string, entry: Open): void {
+  const ranges: SurfaceRange[] = [];
+  const orphans: string[] = [];
+  for (const h of entry.file.highlights) {
+    const at = locate(entry.text, h);
+    if (at.status === "orphan") orphans.push(h.id);
+    else ranges.push({ id: h.id, start: at.start, end: at.end, style: h.color });
+  }
+  surfaces.paint(entry.surface, ranges, PAINT_STYLES);
+  const next = JSON.stringify(orphans.sort());
+  if (entry.orphans === null || next === entry.orphans) return;
+  entry.orphans = next;
+  const lost = answerOrphansPath(path);
+  void queued(lost, () => (orphans.length ? rooms.storage.write(lost, next) : rooms.storage.delete(lost)));
 }
 
 /** Reads the answer's file and paints it, unless the answer left the screen meanwhile. */
 function load(path: string): Promise<void> {
   return queued(path, async () => {
-    const file = readDocFile(await rooms.storage.read(path)) ?? emptyDoc();
+    const [raw, orphans] = await Promise.all([rooms.storage.read(path), rooms.storage.read(answerOrphansPath(path))]);
     const entry = open.get(path);
     if (!entry) return;
-    entry.file = file;
-    paint(entry);
+    entry.file = readDocFile(raw) ?? emptyDoc();
+    entry.orphans = JSON.stringify(parseIds(orphans));
+    paint(path, entry);
   });
 }
 
@@ -59,7 +68,7 @@ function edit(surface: SurfaceId, change: Edit): Promise<void> {
     const entry = open.get(path);
     if (!file || !entry) return;
     entry.file = file;
-    paint(entry);
+    paint(path, entry);
   });
 }
 
@@ -68,10 +77,10 @@ surfaces.onOpen((surface, text) => {
   const entry = open.get(path);
   if (entry) {
     entry.text = text;
-    paint(entry);
+    paint(path, entry);
     return;
   }
-  open.set(path, { surface, text, file: emptyDoc() });
+  open.set(path, { surface, text, file: emptyDoc(), orphans: null });
   void load(path);
 });
 
