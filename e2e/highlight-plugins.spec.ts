@@ -10,6 +10,12 @@ import { expect, test, type Daemon } from "../fixtures";
 
 const DIST = process.env.HIGHLIGHT_DIST!;
 const SHOTS = process.env.HIGHLIGHT_SHOTS ?? "/tmp";
+/**
+ * Leaves out the app's own errors: a failed load, and the inline styles the app's CSP blocks in its
+ * own page (Chromium's and WebKit's wording) since the e2e preview serves that CSP (alto-rooms 75ac1d5).
+ */
+const ownError = (e: string) =>
+  !e.includes("Failed to load resource") && !e.startsWith("Applying inline style violates") && !e.startsWith("Refused to apply a stylesheet because its hash");
 const SWATCHES = ["Important", "Agree", "DisAgree", "IDK"];
 
 async function installHighlight(daemon: Daemon) {
@@ -24,7 +30,7 @@ async function installHighlight(daemon: Daemon) {
 async function turnOn(page: Page) {
   const card = page.getByRole("dialog", { name: "New plugin: Highlights" });
   await expect(card).toBeVisible({ timeout: 5000 });
-  await expect(card).toContainText("Can read the text of documents");
+  await expect(card).toContainText("Can read the text of artifacts");
   await card.getByRole("button", { name: "Turn on" }).click();
   await expect(card).toBeHidden();
 }
@@ -145,7 +151,7 @@ test("select, pick a color in the bar, paint, reload, restore", async ({ page, d
   await expect(ui, "clicking a highlight opens its card").toHaveAttribute("data-card-open");
   await page.screenshot({ path: `${SHOTS}/${browserName}-6-card-click.png` });
   expect(await doc.locator("body").evaluate((b) => /<mark|rooms-highlight/i.test(b.innerHTML)), "nothing of the plugin in body").toBe(false);
-  expect(errors.filter((e) => !e.includes("Failed to load resource")), "no errors").toEqual([]);
+  expect(errors.filter(ownError), "no errors").toEqual([]);
 });
 
 test("a hostile document can forge only its own record, which the plugin reads as untrusted", async ({ page, daemon, browserName }) => {
@@ -203,5 +209,5 @@ window.postMessage({ rooms: "content", v: 1, plugin: "highlight", type: "selecti
   const saved = await stored(daemon, key);
   expect(saved.highlights[0].id).toBe("good");
   expect(saved.highlights[1].color).toBe("agree");
-  expect(errors.filter((e) => !e.includes("Failed to load resource")), "no errors").toEqual([]);
+  expect(errors.filter(ownError), "no errors").toEqual([]);
 });

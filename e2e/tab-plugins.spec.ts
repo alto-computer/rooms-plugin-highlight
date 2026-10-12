@@ -10,6 +10,12 @@ import { expect, test, type Daemon } from "../fixtures";
 
 const DIST = process.env.HIGHLIGHT_DIST!;
 const SHOTS = process.env.HIGHLIGHT_SHOTS ?? "/tmp";
+/**
+ * Leaves out the app's own errors: a failed load, and the inline styles the app's CSP blocks in its
+ * own page (Chromium's and WebKit's wording) since the e2e preview serves that CSP (alto-rooms 75ac1d5).
+ */
+const ownError = (e: string) =>
+  !e.includes("Failed to load resource") && !e.startsWith("Applying inline style violates") && !e.startsWith("Refused to apply a stylesheet because its hash");
 
 async function installHighlight(daemon: Daemon) {
   const dest = path.join(daemon.home, ".rooms", "plugins", "highlight");
@@ -22,14 +28,14 @@ async function installHighlight(daemon: Daemon) {
 async function turnOn(page: Page) {
   const card = page.getByRole("dialog", { name: "New plugin: Highlights" });
   await expect(card).toBeVisible({ timeout: 5000 });
-  await expect(card).toContainText("Can read the text of documents");
-  await expect(card).toContainText("Can see your rooms and documents");
+  await expect(card).toContainText("Can read the text of artifacts");
+  await expect(card).toContainText("Can see your rooms and artifacts");
   await card.getByRole("button", { name: "Turn on" }).click();
   await expect(card).toBeHidden();
 }
 
 const docFrame = (page: Page, title: string): FrameLocator => page.frameLocator(`iframe[title="${title}"]:not([aria-hidden])`);
-const tabFrame = (page: Page) => page.frameLocator('iframe[title="Highlights"]');
+const tabFrame = (page: Page) => page.frameLocator('xpath=//iframe[@title="Highlights"][not(ancestor::*[@data-background-frames])]');
 const tabNamed = (page: Page, name: string) => page.getByRole("tablist", { name: "Tabs" }).getByRole("tab", { name, exact: true });
 
 async function openDoc(page: Page, room: string, title: string) {
@@ -41,7 +47,8 @@ async function openDoc(page: Page, room: string, title: string) {
 }
 
 async function openTab(page: Page) {
-  await page.getByRole("list", { name: "Plugins" }).getByRole("button", { name: "Highlights" }).click();
+  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page.getByRole("menu", { name: "Plugins" }).getByRole("menuitem", { name: "Highlights" }).click();
   await expect(tabNamed(page, "Highlights")).toHaveAttribute("aria-selected", "true");
   await expect(tabFrame(page).getByRole("heading", { name: "Highlights", level: 1 })).toBeVisible();
 }
@@ -198,7 +205,7 @@ test("the Highlights tab lists, filters and searches every document's highlights
     expect(cut, `nothing cut at ${width} px`).toBe(false);
     await page.screenshot({ path: `${SHOTS}/${browserName}-tab-${width}.png` });
   }
-  expect(errors.filter((e) => !e.includes("Failed to load resource")), "no errors").toEqual([]);
+  expect(errors.filter(ownError), "no errors").toEqual([]);
 });
 
 /**
