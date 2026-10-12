@@ -305,3 +305,64 @@ test("the tab lists 4,000 highlights across 200 documents within 500 ms and with
   expect(listP95, "p95 list render").toBeLessThanOrEqual(500);
   expect(longest, "longest task during render and scroll").toBeLessThanOrEqual(100);
 });
+
+test("the tab takes the app's theme and follows it into dark", async ({ page, daemon }) => {
+  await daemon.createRoom("Bench");
+  await daemon.write("Bench/one.html", owl("One real document."));
+  await installHighlight(daemon);
+  const highlights = ["important", "agree", "disagree", "idk"].map((color, i) => ({
+    id: `t${i}`,
+    color,
+    text: `A ${color} sentence.`,
+    prefix: "",
+    suffix: "",
+    start: -1,
+    annotations: [{ id: `n${i}`, body: "a note", createdAt: T }],
+    createdAt: T,
+  }));
+  await daemon.write(`${DATA}/docs/doc-theme/highlights.json`, JSON.stringify({ version: 1, title: "Themed", highlights }));
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/");
+  await turnOn(page);
+  await openTab(page);
+  const tab = tabFrame(page);
+  await expect(tab.locator(".quote")).toHaveCount(4);
+
+  /** The app's tokens as the browser paints them, to compare with the tab's computed colours. */
+  const app = () =>
+    page.evaluate(() => {
+      const read = (v: string) => {
+        const probe = document.createElement("div");
+        probe.style.color = `var(${v})`;
+        document.body.append(probe);
+        const c = getComputedStyle(probe).color;
+        probe.remove();
+        return c;
+      };
+      return { pane: read("--pane"), sheet: read("--sheet"), ink: read("--ink") };
+    });
+  const tabStyle = () =>
+    tab.locator("body").evaluate((body) => {
+      const card = body.querySelector(".hl")!;
+      const quote = body.querySelector(".quote")!;
+      return {
+        pane: getComputedStyle(body).backgroundColor,
+        sheet: getComputedStyle(card).backgroundColor,
+        ink: getComputedStyle(quote).color,
+        scheme: getComputedStyle(document.documentElement).colorScheme,
+      };
+    });
+
+  const light = await app();
+  await expect.poll(tabStyle).toEqual({ ...light, scheme: "light" });
+  await page.screenshot({ path: path.join(SHOTS, "highlight-tab-light.png") });
+
+  await page.getByRole("button", { name: /^Settings/ }).click();
+  await page.getByRole("radiogroup", { name: "Appearance" }).getByRole("radio", { name: "Dark" }).click();
+  await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(true);
+  const dark = await app();
+  expect(dark.pane).not.toBe(light.pane);
+  await tabNamed(page, "Highlights").click();
+  await expect.poll(tabStyle).toEqual({ ...dark, scheme: "dark" });
+  await page.screenshot({ path: path.join(SHOTS, "highlight-tab-dark.png") });
+});

@@ -1,8 +1,8 @@
 {
   "id": "highlight",
   "name": "Highlights",
-  "version": "0.4.0",
-  "minAppVersion": "0.7.0",
+  "version": "0.5.0",
+  "minAppVersion": "0.7.1",
   "description": "Highlight text in any document, chat answer or note in four colors and attach notes, then find every highlight in one tab.",
   "permissions": ["artifact.content", "rooms.read", "surfaces.text"],
   "contentScripts": ["content.js"],
