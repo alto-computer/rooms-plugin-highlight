@@ -212,4 +212,81 @@ describe("HighlightList", () => {
     });
     expect(screen.queryByText("the cache never misses"), "the stale listing is dropped").toBeNull();
   });
+
+  describe("answer highlights", () => {
+    const ROOM = { kind: "answer", scope: { kind: "room", roomId: "r1" }, turnId: "t1" };
+    const PATH = "answer/room/r1/t1.json";
+    const withAnswer = (notes: string[] = []) => ({ ...FILES, [PATH]: file("The cache misses at night", [h("x", "agree", "warm it after the job", 4, notes)]) });
+
+    async function mountAnswer(files: Record<string, string>) {
+      const f = fakeRooms(files);
+      const storage = f.rooms.storage as unknown as Record<string, ReturnType<typeof vi.fn>>;
+      storage.write.mockImplementation(async (p: string, t: string) => void (files[p] = t));
+      storage.delete.mockImplementation(async (p: string) => void delete files[p]);
+      render(<HighlightList rooms={f.rooms} />);
+      await screen.findByText("warm it after the job");
+      return f;
+    }
+
+    it("lists them under their room's chat and jumps back to the answer", async () => {
+      const f = await mountAnswer(withAnswer());
+      const room = within(screen.getByRole("region", { name: "Bench" }));
+      expect(room.getByText("Room chat")).toBeTruthy();
+      expect(room.getByText("warm it after the job").closest(".hl")!.textContent).toMatch(/Agree · Room chat · .*2026/);
+      fireEvent.click(room.getByText("warm it after the job"));
+      expect(f.open).toHaveBeenCalledWith({ surface: ROOM, rangeId: "x" });
+      fireEvent.click(room.getByRole("button", { name: "Bench" }));
+      expect(f.open).toHaveBeenCalledWith({ roomId: "r1" });
+    });
+
+    it("adds, edits and deletes a note on an answer highlight in its file", async () => {
+      const files = withAnswer(["first"]);
+      await mountAnswer(files);
+      const stored = () => JSON.parse(files[PATH]).highlights[0].annotations.map((a: { body: string }) => a.body);
+      fireEvent.click(screen.getByRole("button", { name: "Edit 1 note" }));
+
+      fireEvent.change(screen.getByRole("textbox", { name: "New note" }), { target: { value: "  second  " } });
+      await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Add" })));
+      expect(stored()).toEqual(["first", "second"]);
+
+      const [note] = await screen.findAllByRole("textbox", { name: "Note" });
+      fireEvent.change(note, { target: { value: "first, edited" } });
+      await act(async () => void fireEvent.blur(note));
+      expect(stored()).toEqual(["first, edited", "second"]);
+
+      await act(async () => void fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]));
+      expect(stored()).toEqual(["first, edited"]);
+    });
+
+    it("keeps a note edit and a delete of another note made in one gesture", async () => {
+      const files = withAnswer(["first", "second"]);
+      await mountAnswer(files);
+      const stored = () => JSON.parse(files[PATH]).highlights[0].annotations.map((a: { body: string }) => a.body);
+      fireEvent.click(screen.getByRole("button", { name: "Edit 2 notes" }));
+      const [note] = await screen.findAllByRole("textbox", { name: "Note" });
+      fireEvent.change(note, { target: { value: "first, edited" } });
+      await act(async () => {
+        fireEvent.blur(note);
+        fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+      });
+      expect(stored()).toEqual(["first, edited"]);
+    });
+
+    it("says which answer highlights lost their text", async () => {
+      await mountAnswer({ ...withAnswer(), "answer/room/r1/t1.orphans": JSON.stringify(["x"]) });
+      expect(screen.getByText("warm it after the job").closest(".hl")!.textContent).toContain("Text not found");
+    });
+
+    it("opens a highlight's notes when the menu over the answer asks, once", async () => {
+      const files = { ...withAnswer(), "focus.json": JSON.stringify({ path: PATH, id: "x", at: Date.now() }) };
+      const f = await mountAnswer(files);
+      expect(await screen.findByRole("textbox", { name: "New note" })).toBe(document.activeElement);
+      expect(files["focus.json"]).toBeUndefined();
+
+      fireEvent.click(screen.getByRole("button", { name: "Hide notes" }));
+      files["focus.json"] = JSON.stringify({ path: PATH, id: "x", at: Date.now() - 10 * 60_000 });
+      await act(async () => f.change("focus.json"));
+      expect(screen.queryByRole("textbox", { name: "New note" }), "a stale request is ignored").toBeNull();
+    });
+  });
 });

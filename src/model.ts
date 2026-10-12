@@ -176,6 +176,8 @@ export function newHighlight(quote: Quote, color: Color, id: string, now: string
   return { id, color, ...quote, annotations: [], createdAt: now, updatedAt: now };
 }
 
+export const newId = (): string => [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
+
 export function newNote(body: string, id: string, now: string): Annotation {
   return { id, body: body.trim(), createdAt: now, updatedAt: now };
 }

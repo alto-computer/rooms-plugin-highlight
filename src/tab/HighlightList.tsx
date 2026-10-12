@@ -1,8 +1,9 @@
 import { PluginError, type RoomsPlugin } from "@alto-rooms/plugin-sdk";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { COLORS, ORDER, ORPHANS_PATH, parseIds, type Color, type Highlight } from "../model";
-import { collect, docFileOf, type Collection, type DocHighlights } from "./collect";
+import { ANSWERS, CHAT_LABEL, editAnswer, FOCUS_PATH, parseFocus, Serial } from "../answers";
+import { COLORS, newId, newNote, ORDER, ORPHANS_PATH, parseIds, type Color, type Edit, type Highlight } from "../model";
+import { answerRowKey, collect, docFileOf, docRowKey, rowKey, type Collection, type Found, type Group, type Place } from "./collect";
 
 /** Writes from a document come in bursts (a save, then its orphan report); read once they settle. */
 const REFRESH_DELAY_MS = 150;
@@ -20,11 +21,11 @@ const matches = (h: Highlight, { color, query }: Filter) => {
   return h.text.toLowerCase().includes(query) || h.annotations.some((a) => a.body.toLowerCase().includes(query));
 };
 
-export function filterDocs(docs: readonly DocHighlights[], filter: Filter): DocHighlights[] {
+export function filterGroups(groups: readonly Group[], filter: Filter): Group[] {
   const f = { ...filter, query: filter.query.trim().toLowerCase() };
-  return docs.flatMap((d) => {
-    const highlights = d.highlights.filter((h) => matches(h, f));
-    return highlights.length ? [{ ...d, highlights }] : [];
+  return groups.flatMap((g) => {
+    const found = g.found.filter(({ h }) => matches(h, f));
+    return found.length ? [{ ...g, found }] : [];
   });
 }
 
@@ -34,6 +35,9 @@ function shortDate(iso: string): string {
   return Number.isNaN(t) ? "" : dateFormat.format(t);
 }
 
+/** The background page queues its own edits; this keeps the tab's from overwriting each other. */
+const noteEdits = new Serial();
+
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
@@ -42,6 +46,10 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [notice, setNotice] = useState<string | null>(null);
+  /** Answer rows whose notes are open, by row key. */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  /** The row the range menu over an answer asked to show. */
+  const [focus, setFocus] = useState<string | null>(null);
 
   const latest = useRef(0);
   const collecting = useRef(false);
@@ -75,19 +83,39 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
         return;
       }
       if (run !== latest.current || orphanReads.current.get(fileKey) !== read) return;
-      const orphans = new Set(parseIds(raw));
+      const orphans = new Set(parseIds(raw).map((id) => docRowKey(fileKey, id)));
+      const key = `doc:${fileKey}`;
       setLoad((l) =>
-        l.kind === "ready" ? { ...l, collection: { ...l.collection, docs: l.collection.docs.map((d) => (d.fileKey === fileKey ? { ...d, orphans } : d)) } } : l,
+        l.kind === "ready" ? { ...l, collection: { ...l.collection, groups: l.collection.groups.map((g) => (g.key === key ? { ...g, orphans } : g)) } } : l,
       );
     },
     [rooms],
   );
 
+  const readFocus = useCallback(async () => {
+    let raw: string | null;
+    try {
+      raw = await rooms.storage.read(FOCUS_PATH);
+    } catch {
+      return;
+    }
+    const f = parseFocus(raw, Date.now());
+    if (!f) return;
+    rooms.storage.delete(FOCUS_PATH).catch(() => {});
+    const key = answerRowKey(f.path, f.id);
+    setColor(null);
+    setQuery("");
+    setExpanded((s) => new Set(s).add(key));
+    setFocus(key);
+  }, [rooms]);
+
   useEffect(() => {
     void refresh();
+    void readFocus();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const off = rooms.storage.onChange((path) => {
-      if (!path.startsWith("docs/")) return;
+      if (path === FOCUS_PATH) return void readFocus();
+      if (!path.startsWith("docs/") && !path.startsWith(ANSWERS)) return;
       const file = docFileOf(path);
       // A listing in flight or about to start may have read this file before it changed, so it
       // lists again; otherwise only this document's lost text is read.
@@ -102,7 +130,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
       clearTimeout(timer);
       off();
     };
-  }, [rooms, refresh, refreshOrphans]);
+  }, [rooms, refresh, refreshOrphans, readFocus]);
 
   const listed = useRef(false);
   useLayoutEffect(() => {
@@ -112,29 +140,52 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
     requestAnimationFrame(() => setTimeout(() => performance.mark("rooms-highlight:painted")));
   }, [load]);
 
-  const docs = load.kind === "ready" ? load.collection.docs : [];
-  const shown = useMemo(() => filterDocs(docs, { color, query: deferredQuery }), [docs, color, deferredQuery]);
+  const groups = load.kind === "ready" ? load.collection.groups : [];
+  const shown = useMemo(() => filterGroups(groups, { color, query: deferredQuery }), [groups, color, deferredQuery]);
   const counts = useMemo(() => {
     const c = new Map<Color, number>(ORDER.map((k) => [k, 0]));
-    for (const d of docs) for (const h of d.highlights) c.set(h.color, c.get(h.color)! + 1);
+    for (const g of groups) for (const { h } of g.found) c.set(h.color, c.get(h.color)! + 1);
     return c;
-  }, [docs]);
+  }, [groups]);
   const total = [...counts.values()].reduce((a, b) => a + b, 0);
 
-  const open = useCallback(
-    async (fileKey: string, highlightId?: string) => {
+  const open = useCallback<Open>(
+    async (target) => {
       setNotice(null);
+      const answer = "place" in target && target.place.kind === "answer";
       try {
-        await rooms.open(highlightId ? { fileKey, anchor: { highlightId } } : { fileKey });
+        if (!("place" in target)) await rooms.open(target.group);
+        else if (target.place.kind === "doc") await rooms.open({ fileKey: target.place.fileKey, anchor: { highlightId: target.id } });
+        else await rooms.open({ surface: target.place.surface, rangeId: target.id });
       } catch (e) {
-        console.warn("[highlights] could not open the document", e);
+        console.warn("[highlights] could not open", e);
         if (e instanceof PluginError && e.code === "not_found") {
-          setNotice("That document is no longer in a room.");
+          setNotice(answer ? "That answer is no longer in its chat." : "That document is no longer in a room.");
           void refresh();
         } else {
-          setNotice("That document could not be opened. Try again.");
+          setNotice(answer ? "That answer could not be opened. Try again." : "That document could not be opened. Try again.");
         }
       }
+    },
+    [rooms, refresh],
+  );
+  const toggle = useCallback((key: string) => {
+    setFocus(null);
+    setExpanded((s) => {
+      const next = new Set(s);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }, []);
+  const editNote = useCallback(
+    async (path: string, edit: Edit) => {
+      try {
+        await noteEdits.run(path, () => editAnswer(rooms.storage, path, edit, new Date().toISOString()));
+      } catch (e) {
+        console.warn("[highlights] could not save the note", e);
+        setNotice("That note could not be saved. Try again.");
+      }
+      await refresh();
     },
     [rooms, refresh],
   );
@@ -199,7 +250,7 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
           </div>
         ) : null}
         {total > 0 && !shown.length ? <p className="muted pad">No highlights match.</p> : null}
-        {shown.length ? <DocList docs={shown} open={open} scroller={listRef} /> : null}
+        {shown.length ? <GroupList groups={shown} open={open} scroller={listRef} expanded={expanded} toggle={toggle} editNote={editNote} focus={focus} /> : null}
         {load.kind === "ready" && load.collection.skipped ? (
           <p className="muted pad small-print">{plural(load.collection.skipped, "highlight file")} could not be read.</p>
         ) : null}
@@ -208,55 +259,90 @@ export function HighlightList({ rooms }: { rooms: RoomsPlugin }) {
   );
 }
 
-type Open = (fileKey: string, highlightId?: string) => void;
+type Open = (target: { group: { fileKey: string } | { roomId: string } } | { place: Place; id: string }) => void;
+type EditNote = (path: string, edit: Edit) => Promise<void>;
 
-/** One line of the windowed list: a document's header, or one of its rows. */
-type Item = { kind: "head"; doc: DocHighlights } | { kind: "row"; doc: DocHighlights; h: Highlight; last: boolean };
+/** One line of the windowed list: a group's header, or one of its rows. */
+type Item = { kind: "head"; group: Group } | { kind: "row"; group: Group; found: Found; key: string; last: boolean };
 
-const itemsOf = (docs: readonly DocHighlights[]): Item[] =>
-  docs.flatMap((doc) => [{ kind: "head", doc } as const, ...doc.highlights.map((h, i) => ({ kind: "row", doc, h, last: i === doc.highlights.length - 1 }) as const)]);
+const itemsOf = (groups: readonly Group[]): Item[] =>
+  groups.flatMap((group) => [
+    { kind: "head", group } as const,
+    ...group.found.map((found, i) => ({ kind: "row", group, found, key: rowKey(found), last: i === group.found.length - 1 }) as const),
+  ]);
+
+interface GroupListProps {
+  groups: readonly Group[];
+  open: Open;
+  scroller: RefObject<HTMLElement | null>;
+  expanded: ReadonlySet<string>;
+  toggle: (key: string) => void;
+  editNote: EditNote;
+  focus: string | null;
+}
 
 /**
  * Renders only the lines near the scroll position: thousands of rows took WebKit over half a
- * second to lay out. The rendered lines keep their sections and lists, so each document stays a
- * region of rows, and a document that is cut off at the top keeps its rows in its region.
+ * second to lay out. The rendered lines keep their sections and lists, so each group stays a
+ * region of rows, and a group that is cut off at the top keeps its rows in its region.
  */
-function DocList({ docs, open, scroller }: { docs: readonly DocHighlights[]; open: Open; scroller: RefObject<HTMLElement | null> }) {
-  const items = useMemo(() => itemsOf(docs), [docs]);
+function GroupList({ groups, open, scroller, expanded, toggle, editNote, focus }: GroupListProps) {
+  const items = useMemo(() => itemsOf(groups), [groups]);
   const virtual = useVirtualizer({
     count: items.length,
     getScrollElement: () => scroller.current,
-    estimateSize: (i) => (items[i].kind === "head" ? 30 : 78 + 22 * Math.min(items[i].h.annotations.length, 3)),
+    estimateSize: (i) => {
+      const it = items[i];
+      return it.kind === "head" ? 30 : 78 + 22 * Math.min(it.found.h.annotations.length, 3) + (expanded.has(it.key) ? 120 : 0);
+    },
     getItemKey: (i) => {
       const it = items[i];
-      return it.kind === "head" ? `d:${it.doc.fileKey}` : `h:${it.doc.fileKey}:${it.h.id}`;
+      return it.kind === "head" ? `g:${it.group.key}` : `h:${it.key}`;
     },
     overscan: 10,
   });
+  const focusAt = focus ? items.findIndex((it) => it.kind === "row" && it.key === focus) : -1;
+  /** Scrolls to a focused row once, so a later listing does not pull the list back to it. */
+  const scrolledTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focus) scrolledTo.current = null;
+    if (focusAt < 0 || scrolledTo.current === focus) return;
+    scrolledTo.current = focus;
+    virtual.scrollToIndex(focusAt, { align: "center" });
+  }, [focus, focusAt, virtual]);
+
   const lines = virtual.getVirtualItems();
-  const sections: { doc: DocHighlights; lines: typeof lines }[] = [];
+  const sections: { group: Group; lines: typeof lines }[] = [];
   for (const line of lines) {
-    const doc = items[line.index].doc;
+    const group = items[line.index].group;
     const last = sections[sections.length - 1];
-    if (last?.doc === doc) last.lines.push(line);
-    else sections.push({ doc, lines: [line] });
+    if (last?.group === group) last.lines.push(line);
+    else sections.push({ group, lines: [line] });
   }
   return (
     <div className="window" style={{ height: virtual.getTotalSize() }}>
       <div className="window-slice" style={{ transform: `translateY(${lines[0]?.start ?? 0}px)` }}>
-        {sections.map(({ doc, lines }) => {
-          const removed = doc.rooms.length === 0;
+        {sections.map(({ group, lines }) => {
           const rows = lines.filter((l) => items[l.index].kind === "row");
           return (
-            <section key={doc.fileKey} className="doc" aria-label={doc.title}>
-              {lines[0] && items[lines[0].index].kind === "head" ? <DocHead doc={doc} open={removed ? undefined : open} index={lines[0].index} measure={virtual.measureElement} /> : null}
+            <section key={group.key} className="doc" aria-label={group.title}>
+              {lines[0] && items[lines[0].index].kind === "head" ? <GroupHead group={group} open={open} index={lines[0].index} measure={virtual.measureElement} /> : null}
               {rows.length ? (
                 <ul className="items" role="list">
                   {rows.map((l) => {
-                    const { h, last } = items[l.index] as Extract<Item, { kind: "row" }>;
+                    const { found, key, last } = items[l.index] as Extract<Item, { kind: "row" }>;
                     return (
                       <li key={l.key} className={last ? "last" : undefined} data-index={l.index} ref={virtual.measureElement}>
-                        <Row h={h} orphan={doc.orphans.has(h.id)} fileKey={doc.fileKey} open={removed ? undefined : open} />
+                        <Row
+                          found={found}
+                          rowKey={key}
+                          orphan={group.orphans.has(key)}
+                          open={group.removed ? undefined : open}
+                          expanded={expanded.has(key)}
+                          focused={focus === key}
+                          toggle={toggle}
+                          editNote={editNote}
+                        />
                       </li>
                     );
                   })}
@@ -270,34 +356,50 @@ function DocList({ docs, open, scroller }: { docs: readonly DocHighlights[]; ope
   );
 }
 
-function DocHead({ doc, open, index, measure }: { doc: DocHighlights; open?: Open; index: number; measure: (el: Element | null) => void }) {
+function GroupHead({ group, open, index, measure }: { group: Group; open: Open; index: number; measure: (el: Element | null) => void }) {
+  const target = group.removed ? null : group.target;
   return (
     <header className="doc-head" data-index={index} ref={measure}>
-      {open ? (
+      {target ? (
         <h2 className="doc-title">
-          <button type="button" onClick={() => open(doc.fileKey)}>
-            {doc.title}
+          <button type="button" onClick={() => open({ group: target })}>
+            {group.title}
           </button>
         </h2>
       ) : (
-        <h2 className="doc-title">{doc.title}</h2>
+        <h2 className="doc-title">{group.title}</h2>
       )}
-      <span className="doc-where">{open ? doc.rooms.join(" · ") : "Doc removed"}</span>
+      <span className="doc-where">{group.where}</span>
     </header>
   );
 }
 
-const Row = memo(function Row({ h, orphan, fileKey, open }: { h: Highlight; orphan: boolean; fileKey: string; open?: Open }) {
+interface RowProps {
+  found: Found;
+  rowKey: string;
+  orphan: boolean;
+  open?: Open;
+  expanded: boolean;
+  focused: boolean;
+  toggle: (key: string) => void;
+  editNote: EditNote;
+}
+
+const Row = memo(function Row({ found, rowKey, orphan, open, expanded, focused, toggle, editNote }: RowProps) {
+  const { h, place } = found;
   const c = COLORS[h.color];
-  const meta = [c.label, shortDate(h.createdAt), h.annotations.length ? plural(h.annotations.length, "note") : ""].filter(Boolean).join(" · ");
+  const chat = place.kind === "answer" ? CHAT_LABEL[place.surface.scope.kind] : "";
+  const meta = [c.label, chat, shortDate(h.createdAt), h.annotations.length ? plural(h.annotations.length, "note") : ""].filter(Boolean).join(" · ");
   const body = (
     <>
       <span className="quote">{h.text}</span>
-      {h.annotations.map((a) => (
-        <span key={a.id} className="note">
-          {a.body}
-        </span>
-      ))}
+      {expanded
+        ? null
+        : h.annotations.map((a) => (
+            <span key={a.id} className="note">
+              {a.body}
+            </span>
+          ))}
       <span className="meta">
         <span className="dot" aria-hidden />
         <span>
@@ -313,8 +415,8 @@ const Row = memo(function Row({ h, orphan, fileKey, open }: { h: Highlight; orph
     </>
   );
   const style = { "--hl-solid": c.solid, "--hl-bg": c.bg } as CSSProperties;
-  return open ? (
-    <button type="button" className="hl" style={style} onClick={() => open(fileKey, h.id)}>
+  const card = open ? (
+    <button type="button" className="hl" style={style} onClick={() => open({ place, id: h.id })}>
       {body}
     </button>
   ) : (
@@ -322,4 +424,59 @@ const Row = memo(function Row({ h, orphan, fileKey, open }: { h: Highlight; orph
       {body}
     </div>
   );
+  if (place.kind !== "answer") return card;
+  // Notes on answer highlights are edited here: the app draws only buttons and menus over answers.
+  return (
+    <div className="answer-row">
+      {card}
+      <button type="button" className="notes-toggle" aria-expanded={expanded} onClick={() => toggle(rowKey)}>
+        {expanded ? "Hide notes" : h.annotations.length ? `Edit ${plural(h.annotations.length, "note")}` : "Add a note"}
+      </button>
+      {expanded ? <Notes h={h} path={place.path} editNote={editNote} autoFocus={focused} /> : null}
+    </div>
+  );
 });
+
+function Notes({ h, path, editNote, autoFocus }: { h: Highlight; path: string; editNote: EditNote; autoFocus: boolean }) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    if (!draft.trim()) return;
+    void editNote(path, { kind: "addNote", id: h.id, note: newNote(draft, newId(), new Date().toISOString()) });
+    setDraft("");
+  };
+  return (
+    <div className="notes">
+      {h.annotations.map((a) => (
+        <div key={`${a.id}:${a.updatedAt}`} className="note-edit">
+          <textarea
+            aria-label="Note"
+            defaultValue={a.body}
+            rows={2}
+            onBlur={(e) => {
+              if (e.target.value.trim() !== a.body) void editNote(path, { kind: "editNote", id: h.id, noteId: a.id, body: e.target.value });
+            }}
+          />
+          <button type="button" onClick={() => void editNote(path, { kind: "removeNote", id: h.id, noteId: a.id })}>
+            Delete
+          </button>
+        </div>
+      ))}
+      <div className="note-edit">
+        <textarea
+          aria-label="New note"
+          placeholder="Add a note"
+          rows={2}
+          value={draft}
+          autoFocus={autoFocus}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) add();
+          }}
+        />
+        <button type="button" disabled={!draft.trim()} onClick={add}>
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
