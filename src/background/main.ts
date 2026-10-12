@@ -6,7 +6,7 @@
 import { connect, connectSurfaces, type SurfaceId, type SurfaceRange } from "@alto-rooms/plugin-sdk";
 import { answerPath, answerTitle, editAnswer, FOCUS_PATH, PAINT_STYLES, type Focus } from "../answers";
 import { locate } from "../content/anchor";
-import { COLORS, CONTEXT, emptyDoc, isColor, newHighlight, ORDER, readDocFile, TEXT_MAX, type DocFile, type Edit } from "../model";
+import { COLORS, CONTEXT, emptyDoc, isColor, newHighlight, newId, ORDER, readDocFile, TEXT_MAX, type DocFile, type Edit } from "../model";
 
 const DELETE = "delete";
 const NOTES = "notes";
@@ -25,7 +25,6 @@ const open = new Map<string, Open>();
 const queues = new Map<string, Promise<unknown>>();
 
 const now = () => new Date().toISOString();
-const newId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 function paint(entry: Open): void {
   const ranges: SurfaceRange[] = entry.file.highlights.flatMap((h) => {

@@ -258,3 +258,58 @@ button.hl:hover {
 .message button:hover {
   background: var(--hover);
 }
+
+.answer-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.notes-toggle {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--ink-2);
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+.notes-toggle:hover {
+  background: var(--hover);
+}
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0 4px 12px;
+}
+.note-edit {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+.note-edit textarea {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 5px 8px;
+  resize: vertical;
+}
+.note-edit button {
+  font-size: 12px;
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 9px;
+}
+.note-edit button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.note-edit button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+textarea:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}

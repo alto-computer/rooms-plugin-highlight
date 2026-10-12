@@ -5,7 +5,7 @@
  * <head>, before the body exists.
  */
 import { connectContent, type ContentSelection } from "@alto-rooms/plugin-sdk";
-import { applyEdit, COLORS, DOC_PATH, emptyDoc, isColor, newHighlight, newNote, ORDER, ORPHANS_PATH, parseDocFile, parseIds, serialize, TEXT_MAX, type Color, type DocFile, type Edit } from "../model";
+import { applyEdit, COLORS, DOC_PATH, emptyDoc, isColor, newHighlight, newId, newNote, ORDER, ORPHANS_PATH, parseDocFile, parseIds, serialize, TEXT_MAX, type Color, type DocFile, type Edit } from "../model";
 import { buildIndex, quoteOf, rangeAt } from "./anchor";
 import { caretAt, hitTest } from "./hit";
 import { adoptPaintStyles, createPainter, nativeHighlightApi } from "./paint";
@@ -41,7 +41,6 @@ let started!: () => void;
 const whenStarted = new Promise<void>((resolve) => (started = resolve));
 
 const now = () => new Date().toISOString();
-const newId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 function repaint(): void {
   adoptPaintStyles(document);
